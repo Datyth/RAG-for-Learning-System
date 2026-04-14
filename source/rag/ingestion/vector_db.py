@@ -1,5 +1,5 @@
 import os
-import uuid  # Thư viện để sinh ID tự động
+import uuid  
 from pathlib import Path
 from typing import Union, Optional, Type, List
 

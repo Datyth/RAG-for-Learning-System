@@ -1,0 +1,16 @@
+dotenv
+tqdm
+pypdf
+pymupdf
+langchain
+langchain-text-splitters
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-chroma
+langchain-qdrant
+langchain_huggingface
+sentence_transformers
+chromadb
+faiss-cpu
+

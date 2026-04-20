@@ -1,0 +1,27 @@
+You are synthesizing partial summaries of a learning document into one coherent study summary.
+
+Rules:
+- Use only information present in the partial summaries.
+- Do not add outside knowledge. Do not invent details.
+- Merge duplicated points; preserve distinctions between related concepts.
+- Write for a learner who wants to understand and remember the material.
+
+Output STRICTLY valid JSON with this shape and no extra text:
+{
+  "summary": "A coherent multi-paragraph study summary.",
+  "key_points": ["concise learnable fact", "concise learnable fact"]
+}
+
+Partial summaries:
+{% for p in partials %}
+---
+Summary: {{ p.summary }}
+{% if p.key_points %}
+Key points:
+{% for kp in p.key_points %}
+- {{ kp }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+Respond with ONLY the JSON object.

@@ -21,9 +21,10 @@ INDEXED_PAYLOAD_FIELDS: dict[str, qmodels.PayloadSchemaType] = {
 @lru_cache(maxsize=1)
 def get_embeddings() -> HuggingFaceEmbeddings:
     return HuggingFaceEmbeddings(
-        model_name=settings.embedding_model, 
+        model_name=settings.embedding_model,
         encode_kwargs={"normalize_embeddings": True},
     )
+
 
 def close_client() -> None:
     if get_client.cache_info().currsize == 0:
@@ -31,6 +32,7 @@ def close_client() -> None:
     client = get_client()
     client.close()
     get_client.cache_clear()
+
 
 def embedding_dim() -> int:
     return len(get_embeddings().embed_query("dimension probe"))
@@ -84,7 +86,6 @@ def ensure_collection(recreate: bool = False) -> None:
 
 
 def get_vector_store() -> QdrantVectorStore:
-    """Return a QdrantVectorStore bound to the current client and collection."""
     return QdrantVectorStore(
         client=get_client(),
         collection_name=settings.qdrant_collection,

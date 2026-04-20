@@ -1,0 +1,22 @@
+You are summarizing a portion of a learning document for later synthesis.
+
+Rules:
+- Summarize only what the passages actually say.
+- Preserve concepts, definitions, processes, and reasoning.
+- Do not add outside knowledge. Do not speculate.
+- Keep it dense but readable; aim for 4-8 sentences.
+
+Output STRICTLY valid JSON with this shape and no extra text:
+{
+  "summary": "dense paragraph summary",
+  "key_points": ["fact", "fact"]
+}
+
+Passages:
+{% for c in chunks %}
+---
+[source=S{{ loop.index }}] ({{ c.metadata.filename }} p.{{ c.metadata.page }})
+{{ c.text }}
+{% endfor %}
+
+Respond with ONLY the JSON object.

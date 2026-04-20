@@ -1,6 +1,7 @@
 """Load PDFs, split into chunks with metadata, and index into Qdrant."""
 
 import hashlib
+from collections import defaultdict
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -49,7 +50,7 @@ def _load_pdf(path: Path) -> list[Document]:
 
 def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
     directory = data_dir or settings.data_dir
-    return sorted(p for p in directory.glob("*.pdf") if p.is_file())
+    return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
 
 
 def build_chunks(pdf_paths: list[Path]) -> list[Document]:
@@ -60,11 +61,11 @@ def build_chunks(pdf_paths: list[Path]) -> list[Document]:
 
     chunks = _splitter().split_documents(page_docs)
 
-    per_doc_counter: dict[str, int] = {}
+    per_doc_counter: dict[str, int] = defaultdict(int)
     for chunk in chunks:
         doc_id = chunk.metadata["document_id"]
-        idx = per_doc_counter.get(doc_id, 0)
-        per_doc_counter[doc_id] = idx + 1
+        idx = per_doc_counter[doc_id]
+        per_doc_counter[doc_id] += 1
         meta = ChunkMetadata(
             document_id=doc_id,
             filename=chunk.metadata["filename"],

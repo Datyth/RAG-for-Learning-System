@@ -37,6 +37,12 @@ class Settings:
     gemini_model: str
     google_api_key: str | None
 
+    summarize_batch_size: int
+    summarize_retrieval_k: int
+    quiz_default_count: int
+    flashcards_default_count: int
+    generation_retrieval_k: int
+
 
 settings = Settings(
     data_dir=Path("./data"),
@@ -49,8 +55,13 @@ settings = Settings(
     llm_provider="hf_local",
     llm_temperature=0.1,
     hf_model="/mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507",
-    hf_device=0,
-    hf_max_new_tokens=512,
+    hf_device=1,
+    hf_max_new_tokens=2048,
     gemini_model="gemini-2.5-flash",
     google_api_key=_secret("GOOGLE_API_KEY"),
+    summarize_batch_size=10,
+    summarize_retrieval_k=12,
+    quiz_default_count=8,
+    flashcards_default_count=15,
+    generation_retrieval_k=16,
 )

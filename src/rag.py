@@ -135,26 +135,25 @@ def _build_hf_local() -> BaseChatModel:
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
     do_sample = settings.llm_temperature > 0
-    pipeline_kwargs: dict = {
-        "max_new_tokens": settings.hf_max_new_tokens,
-        "max_length": None,
-        "do_sample": do_sample,
-        "return_full_text": False,
-    }
-    if do_sample:
-        pipeline_kwargs["temperature"] = settings.llm_temperature
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
         model = AutoModelForCausalLM.from_pretrained(settings.hf_model, dtype=torch.bfloat16)
+        model.generation_config.max_length = None
 
         text_gen_pipeline = pipeline(
             task="text-generation",
             model=model,
             tokenizer=tokenizer,
             device=settings.hf_device,
-            **pipeline_kwargs,
+            return_full_text=False,
         )
+        text_gen_pipeline.generation_config.max_new_tokens = settings.hf_max_new_tokens
+        text_gen_pipeline.generation_config.max_length = None
+        text_gen_pipeline.generation_config.do_sample = do_sample
+        if do_sample:
+            text_gen_pipeline.generation_config.temperature = settings.llm_temperature
+
         llm = HuggingFacePipeline(pipeline=text_gen_pipeline)
     except Exception as e:
         raise RuntimeError(
@@ -204,7 +203,7 @@ def answer(
     if not chunks:
         return RagAnswer(
             question=question,
-            answer="I don't have enough information in the provided context to answer.",
+            answer="Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời.",
         )
 
     prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=chunks)

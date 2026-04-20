@@ -1,6 +1,7 @@
 """Load PDFs, split into chunks with metadata, and index into Qdrant."""
 
 import hashlib
+import uuid
 from collections import defaultdict
 from pathlib import Path
 
@@ -36,14 +37,14 @@ def _load_pdf(path: Path) -> list[Document]:
     loader = PyPDFLoader(str(path))
     pages = loader.load()
     doc_id = _document_id(path)
-    for p in pages:
-        page_number = int(p.metadata.get("page", 0)) + 1
-        p.metadata = {
+    for doc in pages:
+        page_number = int(doc.metadata.get("page", 0)) + 1
+        doc.metadata = {
             "document_id": doc_id,
             "filename": path.name,
             "source": str(path.resolve()),
             "page": page_number,
-            "section": p.metadata.get("section"),
+            "section": doc.metadata.get("section"),
         }
     return pages
 
@@ -91,7 +92,10 @@ def ingest(recreate: bool = False) -> int:
         logger.warning("No chunks produced from {} PDF(s)", len(pdfs))
         return 0
 
+    # Deterministic UUIDs from chunk_id ensure upsert semantics: re-ingesting the same
+    # file without --recreate overwrites existing points instead of creating duplicates.
+    ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks]
     store = get_vector_store()
-    store.add_documents(chunks)
+    store.add_documents(chunks, ids=ids)
     logger.info("Ingested {} chunks from {} PDF(s)", len(chunks), len(pdfs))
     return len(chunks)

@@ -25,13 +25,14 @@ def _citations_block(citations: list[Citation]) -> str:
 
 
 def write_text(path: Path, text: str) -> Path:
+    """Write `text` to `path`, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
 
 def to_json(model: BaseModel) -> str:
-    """Serialize any learning output model to stable JSON."""
+    """Serialize a learning output model to JSON."""
     return model.model_dump_json(indent=2)
 
 
@@ -137,14 +138,17 @@ def flashcards_to_markdown(flashcards: FlashcardSet) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def model_to_text(model: BaseModel) -> str:
+    """Render a learning output model as Markdown text."""
+    if isinstance(model, Summary):
+        return summary_to_markdown(model)
+    if isinstance(model, QuizSet):
+        return quiz_to_markdown(model)
+    if isinstance(model, FlashcardSet):
+        return flashcards_to_markdown(model)
+    raise TypeError(f"Unsupported model type: {type(model).__name__}")
+
+
 def write_markdown(model: BaseModel, path: Path) -> Path:
     """Write a learning output model as Markdown to `path`."""
-    if isinstance(model, Summary):
-        text = summary_to_markdown(model)
-    elif isinstance(model, QuizSet):
-        text = quiz_to_markdown(model)
-    elif isinstance(model, FlashcardSet):
-        text = flashcards_to_markdown(model)
-    else:
-        raise TypeError(f"Unsupported model for markdown export: {type(model).__name__}")
-    return write_text(path, text)
+    return write_text(path, model_to_text(model))

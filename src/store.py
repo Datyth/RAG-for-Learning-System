@@ -61,17 +61,25 @@ def ensure_collection(recreate: bool = False) -> None:
             ),
         )
 
+    collection_info = client.get_collection(name)
+    existing_payload_schema = collection_info.payload_schema or {}
+
     for field_name, field_schema in INDEXED_PAYLOAD_FIELDS.items():
-        try:
+        existing_index = existing_payload_schema.get(field_name)
+        if existing_index is None:
             client.create_payload_index(
                 collection_name=name,
                 field_name=field_name,
                 field_schema=field_schema,
             )
-        except Exception:
-            pass
+            continue
 
-
+        existing_schema = getattr(existing_index, "data_type", None)
+        if existing_schema != field_schema:
+            raise ValueError(
+                f"Payload index for '{field_name}' already exists with schema "
+                f"{existing_schema!r}, expected {field_schema!r}."
+            )
 def get_vector_store() -> QdrantVectorStore:
     """Return a QdrantVectorStore bound to the current client and collection."""
     return QdrantVectorStore(

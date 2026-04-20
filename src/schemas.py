@@ -45,7 +45,7 @@ class RagAnswer(BaseModel):
 class Summary(BaseModel):
     """Grounded study-oriented summary of a document or subset."""
 
-    scope: str  # "document" | "filter" | "query"
+    scope: str  # "query" | "document" | "filter" | "corpus"
     target: str | None = None
     summary: str
     key_points: list[str] = Field(default_factory=list)
@@ -75,7 +75,7 @@ class QuizItem(BaseModel):
 class QuizSet(BaseModel):
     """A reusable set of grounded quiz items with resolved citations."""
 
-    scope: str
+    scope: str  # "query" | "document" | "filter" | "corpus"
     target: str | None = None
     items: list[QuizItem] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
@@ -94,7 +94,7 @@ class Flashcard(BaseModel):
 class FlashcardSet(BaseModel):
     """A reusable set of grounded flashcards with resolved citations."""
 
-    scope: str
+    scope: str  # "query" | "document" | "filter" | "corpus"
     target: str | None = None
     cards: list[Flashcard] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)

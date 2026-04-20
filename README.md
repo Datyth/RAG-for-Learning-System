@@ -1,256 +1,238 @@
-# RAG-for-Learning-System
+# RAG for Learning System
 
-A minimal, production-style Retrieval-Augmented Generation (RAG) learning system over local PDF documents, with grounded answers, summarization, quiz generation, and flashcard generation.
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![uv](https://img.shields.io/badge/uv-package%20manager-DE5FE9)
+![Qdrant](https://img.shields.io/badge/Qdrant-vector%20store-DC244C)
+![LangChain](https://img.shields.io/badge/LangChain-framework-1C3C3C)
 
-## Overview
+> A local Retrieval-Augmented Generation pipeline for studying PDF documents.
+> Generates grounded answers, summaries, quizzes, and flashcards.
 
-This project ingests PDF files from a local `data/` directory, splits them into chunks, embeds them with a Hugging Face model, stores them in a local Qdrant collection, and produces grounded study material using retrieved context only.
 
-Key capabilities:
+## Table of Contents
 
-- PDF ingestion with metadata preservation
-- Local vector storage with Qdrant
-- Retrieval with optional metadata filtering
-- Prompt rendering via Jinja2
-- Grounded answer generation with inline source markers
-- Grounded document summarization (single-shot or staged map/reduce)
-- Structured multiple-choice quiz generation with citations
-- Structured flashcard generation for study and review
-- JSON and Markdown exports for quizzes, flashcards, and summaries
-- CLI for ingest, query, debug, summarize, quiz, flashcards
-- Two LLM providers: local Hugging Face (default) and Gemini (optional)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+- [LLM Providers](#llm-providers)
+- [Project Structure](#project-structure)
 
-## Project Structure
 
-```text
-.
-├── data/                  # Local PDF documents for ingestion
-├── src/
-│   ├── __init__.py
-│   ├── cli.py             # CLI: ingest, ask, debug-retrieval, summarize, quiz, flashcards
-│   ├── config.py          # Application settings
-│   ├── export.py          # JSON/Markdown export for learning outputs
-│   ├── indexing.py        # PDF loading, metadata, chunking
-│   ├── learning.py        # Summarization, quiz, and flashcard generation
-│   ├── rag.py             # Retrieval, prompting, answer generation
-│   ├── schemas.py         # Pydantic schemas (chunks + learning outputs)
-│   ├── store.py           # Embeddings and Qdrant setup
-│   └── prompts/
-│       ├── answer.jinja2
-│       ├── summary_single.jinja2
-│       ├── summary_map.jinja2
-│       ├── summary_reduce.jinja2
-│       ├── quiz.jinja2
-│       └── flashcards.jinja2
-├── storage/
-│   └── qdrant/            # Local Qdrant storage
-├── .env.example
-├── pyproject.toml
-├── README.md
-├── requirements.txt
-└── uv.lock
+## Features
+
+- Grounded Q&A with inline source citations `[S1]`, `[S2]`
+- Document summarization — single-shot or staged map/reduce for long inputs
+- Multiple-choice quiz generation with answers, explanations, and difficulty tags
+- Flashcard generation for spaced repetition
+- Metadata filtering by filename, page, section, or any indexed field
+- Vietnamese output across all LLM responses
+- JSON and Markdown export for all learning outputs
+- Two LLM backends: local HuggingFace (default) and Google Gemini
+
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Ingest
+        A([PDF Files]) --> B[PyPDFLoader]
+        B --> C[Text Splitter]
+        C --> D[HF Embeddings]
+        D --> E[(Qdrant\non-disk)]
+    end
+
+    subgraph Query
+        F([Question]) --> G[Vector Search]
+        E --> G
+        G --> H[Top-K Chunks]
+        H --> I[Jinja2 Prompt]
+        I --> J[LLM]
+        J --> K([Output\nVietnamese])
+    end
 ```
 
-## Requirements
-
-- Python 3.11+
-- `uv` or `pip` with a virtual environment
-- For Gemini only: a valid `GOOGLE_API_KEY`
 
 ## Quick Start
 
-### 1. Install dependencies
-
-#### Using `uv` (recommended)
-
 ```bash
+# 1. Install dependencies
 uv sync
+
+# 2. Configure secrets  (Gemini only — skip if using local HF)
 cp .env.example .env
-```
 
-<details>
-<summary><strong>Using <code>pip</code> instead</strong></summary>
-
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .
-cp .env.example .env
-```
-
-</details>
-
-### 2. Add documents
-
-Place your PDF files in `./data/`.
-
-### 3. Configure the runtime
-
-All runtime configuration lives in `src/config.py`.
-
-Edit the `settings = Settings(...)` block to change paths, models, chunking parameters, retrieval settings, or device placement.
-
-The `.env` file is used for secrets only:
-
-```env
-GOOGLE_API_KEY=your-api-key-here
-```
-
-This key is required only when `llm_provider = "gemini"`.
-
-### 4. Ingest documents
-
-```bash
+# 3. Place PDFs in ./data/, then ingest
 uv run rag ingest
-```
 
-To rebuild the collection from scratch:
-
-```bash
-uv run rag ingest --recreate
-```
-
-If you installed with `pip install -e .`, you can also run:
-
-```bash
-rag ingest
-```
-
-### 5. Ask questions
-
-```bash
+# 4. Ask a question
 uv run rag ask "What is LoRA fine-tuning?"
 ```
 
-## LLM Providers
 
-The active provider is controlled by `llm_provider` in `src/config.py`.
+## Configuration
 
-| Provider | `llm_provider` value | Secret required |
-| --- | --- | --- |
-| Local Hugging Face (default) | `hf_local` | None |
-| Gemini | `gemini` | `GOOGLE_API_KEY` in `.env` |
+All runtime parameters live in `src/config.py`. The `.env` file is for secrets only (`GOOGLE_API_KEY`).
 
 <details>
-<summary><strong>Local Hugging Face (default)</strong></summary>
+<summary>Full settings reference</summary>
 
-Runs a local Transformers `text-generation` pipeline through LangChain's `ChatHuggingFace`.
-
-Relevant settings in `src/config.py`:
-
-- `hf_model` — local model path or model identifier
-- `hf_device` — `-1` for CPU, `0+` for a CUDA device index
-- `hf_max_new_tokens` — maximum generated tokens
-- `llm_temperature` — shared with Gemini
-
-This provider does not require an API key.
+| Setting | Default | Description |
+|---|---|---|
+| `llm_provider` | `hf_local` | `"hf_local"` or `"gemini"` |
+| `hf_model` | Qwen3-4B-Instruct | Local path or HuggingFace model ID |
+| `hf_device` | `1` | `-1` = CPU, `0+` = CUDA device index |
+| `hf_max_new_tokens` | `2048` | Max tokens to generate |
+| `llm_temperature` | `0.1` | Generation temperature |
+| `embedding_model` | GreenNode VN Mixed | HuggingFace embedding model |
+| `top_k` | `5` | Default retrieval chunk count |
+| `chunk_size` | `1000` | Characters per chunk |
+| `chunk_overlap` | `150` | Overlap between adjacent chunks |
+| `summarize_batch_size` | `10` | Chunks per map-reduce batch |
+| `summarize_retrieval_k` | `12` | Chunks retrieved for summarization |
+| `generation_retrieval_k` | `16` | Chunks retrieved for quiz/flashcards |
+| `quiz_default_count` | `8` | Default number of quiz items |
+| `flashcards_default_count` | `15` | Default number of flashcards |
 
 </details>
 
+
+## CLI Reference
+
+All learning commands (`summarize`, `quiz`, `flashcards`) share these scoping flags:
+
+| Flag | Description |
+|---|---|
+| `-d, --document FILENAME` | Target a specific indexed PDF |
+| `-q, --query TEXT` | Retrieval guided by topic or question |
+| `-f, --filter key=value` | Arbitrary metadata filter (repeatable) |
+| `--k N` | Override retrieval top-k |
+| `-o, --output PATH` | Write output to file instead of stdout |
+| `--format text\|json\|md` | Output format (default: `text`) |
+
+With no scope options, commands run over the entire corpus.
+
+
 <details>
-<summary><strong>Gemini (optional)</strong></summary>
-
-To use Gemini:
-
-1. Set `llm_provider = "gemini"` in `src/config.py`
-2. Add `GOOGLE_API_KEY` to `.env`
-
-```env
-GOOGLE_API_KEY=your-api-key-here
-```
-
-The Gemini model name is controlled by `gemini_model` in `src/config.py`.
-
-</details>
-
-## CLI Usage
-
-### Ingest PDFs
+<summary><strong>rag ingest</strong> — Index PDFs into Qdrant</summary>
 
 ```bash
 uv run rag ingest
-uv run rag ingest --recreate
+uv run rag ingest --recreate        # drop and rebuild the collection
 ```
 
-### Ask questions
+</details>
+
+<details>
+<summary><strong>rag ask</strong> — Grounded Q&A</summary>
 
 ```bash
-uv run rag ask "What is LoRA fine-tuning?"
-uv run rag ask "Summarize the alignment paper" --k 8
-uv run rag ask "What does page 3 say?" -f filename="[Reading]-LLM-Alignment.pdf" -f page=3
+uv run rag ask "What is RLHF?"
+uv run rag ask "Explain reward modeling" --k 8
+uv run rag ask "What is on page 3?" -f filename="paper.pdf" -f page=3
 ```
 
-When installed with `pip install -e .`, you can replace `uv run rag` with `rag`.
+If no relevant context is found, the system replies:
+> "Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời."
 
-If no relevant context is retrieved, the system returns:
+</details>
 
-```text
-I don't have enough information in the provided context to answer.
-```
+<details>
+<summary><strong>rag summarize</strong> — Study-oriented summaries</summary>
 
-### Inspect retrieval
+Automatically switches to map/reduce when chunk count exceeds `summarize_batch_size`.
 
 ```bash
-uv run rag debug-retrieval "reinforcement learning from human feedback"
+uv run rag summarize --document "paper.pdf"
+uv run rag summarize --query "LoRA fine-tuning" --k 12
+uv run rag summarize -d paper.pdf -o exports/summary.md --format md
+```
+
+</details>
+
+<details>
+<summary><strong>rag quiz</strong> — Multiple-choice quiz generation</summary>
+
+Produces structured items with answer, explanation, difficulty, topic tag, and source markers.
+
+```bash
+uv run rag quiz --document "paper.pdf" --count 10
+uv run rag quiz --query "reward model training" -n 6 --format json -o exports/quiz.json
+uv run rag quiz -f filename="paper.pdf" -f page=3 -n 4
+```
+
+</details>
+
+<details>
+<summary><strong>rag flashcards</strong> — Spaced-repetition flashcards</summary>
+
+Each card includes front, back, optional hint, topic tag, and source markers.
+
+```bash
+uv run rag flashcards --document "paper.pdf" --count 20
+uv run rag flashcards --query "PEFT methods" -n 12 --format md -o exports/cards.md
+```
+
+</details>
+
+<details>
+<summary><strong>rag debug-retrieval</strong> — Inspect raw retrieval results</summary>
+
+Shows scores, metadata, and chunk previews without calling the LLM.
+
+```bash
+uv run rag debug-retrieval "attention mechanism"
 uv run rag debug-retrieval "GPT pretraining" --k 10 --json
 ```
 
-## Learning Features
+</details>
 
-All learning commands reuse the indexed corpus, metadata filters, and citation model. Outputs are grounded in retrieved chunks only. If evidence is insufficient, generation returns fewer items or fails clearly instead of fabricating content.
 
-Scoping options (shared across `summarize`, `quiz`, `flashcards`):
+## LLM Providers
 
-- `--document, -d FILENAME` — target a single indexed PDF (matches `metadata.filename`)
-- `--query, -q TEXT` — topic- or question-guided retrieval, ranked by similarity
-- `--filter, -f key=value` — any additional metadata filter (repeatable)
-- `--k N` — retrieval `top_k` override for query mode
-- `--output, -o PATH` — write output to a file instead of stdout
-- `--format text|json|md` — stdout/file format (default `text`, renders Markdown-like text)
+| Provider | `llm_provider` | Requires |
+|---|---|---|
+| Local HuggingFace | `hf_local` (default) | — |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` in `.env` |
 
-With no scope options, these commands run over the entire corpus.
+<details>
+<summary>Local HuggingFace setup</summary>
 
-### Summarize
+Set `hf_model` to a local path or model ID, `hf_device` to your CUDA index (or `-1` for CPU).
 
-Generates a grounded, study-oriented summary with key points and citations. For long inputs, the pipeline auto-falls back to a staged map/reduce summarization.
+Generation parameters (`max_new_tokens`, `temperature`, `do_sample`) are applied directly to the pipeline's `generation_config` after construction to avoid deprecation warnings from passing them alongside `generation_config`.
 
-```bash
-uv run rag summarize --document "[Reading]-LLM-Alignment.pdf"
-uv run rag summarize --query "LoRA fine-tuning" --k 12
-uv run rag summarize -d paper.pdf -o exports/paper-summary.md --format md
+</details>
+
+<details>
+<summary>Google Gemini setup</summary>
+
+1. Set `llm_provider = "gemini"` in `src/config.py`
+2. Add your key to `.env`:
+
+```env
+GOOGLE_API_KEY=your-api-key-here
 ```
 
-### Quiz generation
+The model name is controlled by `gemini_model` in `src/config.py`.
 
-Generates a structured multiple-choice quiz set with answers, explanations, and source markers tied back to retrieved chunks.
+</details>
 
-```bash
-uv run rag quiz --document "[Reading]-LLM-Alignment.pdf" --count 10
-uv run rag quiz --query "reward model training" -n 6 --format json -o exports/rm-quiz.json
-uv run rag quiz -f filename=paper.pdf -f page=3 -n 4
+
+## Project Structure
+
 ```
-
-### Flashcard generation
-
-Generates reusable flashcards suitable for spaced repetition, each grounded in the source.
-
-```bash
-uv run rag flashcards --document paper.pdf --count 20
-uv run rag flashcards --query "PEFT methods" -n 12 --format md -o exports/peft-cards.md
+src/
+├── cli.py          # Typer CLI — 6 commands
+├── config.py       # Frozen Settings dataclass — all runtime params
+├── export.py       # JSON / Markdown serialization
+├── indexing.py     # PDF loading, chunking, ingestion
+├── learning.py     # Summarize, quiz, flashcard generation
+├── rag.py          # Retrieval, prompting, LLM abstraction
+├── schemas.py      # Pydantic models for all outputs
+├── store.py        # Embeddings singleton + Qdrant client
+└── prompts/        # Jinja2 templates — edit to change LLM behaviour
+data/               # Input PDFs
+storage/qdrant/     # On-disk vector store (not committed)
 ```
-
-### Output formats
-
-- `text` — human-readable Markdown rendered to stdout or file
-- `md` — Markdown file (when `--output` is set)
-- `json` — stable, machine-friendly Pydantic JSON dump
-
-JSON outputs carry the full schema (items/cards, citations, scope, target). Markdown outputs are easy to copy into notes or teaching materials.
-
-## Notes
-
-- `storage/qdrant/` is local on-disk state and is excluded from version control.
-- `.env` is for secrets only.
-- The CLI entrypoint is `rag`, registered through `pyproject.toml`.
-- Learning defaults (`summarize_batch_size`, `summarize_retrieval_k`, `quiz_default_count`, `flashcards_default_count`, `generation_retrieval_k`) live in `src/config.py`.

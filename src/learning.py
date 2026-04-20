@@ -77,7 +77,6 @@ def _extract_json(text: str) -> str:
                 depth -= 1
                 if depth == 0:
                     return cleaned[start : i + 1]
-    print(text)
     raise GenerationError("No JSON object found in model output.")
 
 
@@ -95,26 +94,26 @@ def _resolve_target(
     filters: dict[str, str | int] | None,
     k: int | None,
     retrieval_k: int,
-) -> tuple[list[RetrievedChunk], str, str]:
+) -> tuple[list[RetrievedChunk], str, str | None]:
     """Resolve input options into (chunks, scope, target_label)."""
     effective_filters: dict[str, str | int] = dict(filters or {})
     if document:
         effective_filters["filename"] = document
 
     if query:
-        chunks = retrieve(query, k=k or retrieval_k, filters=effective_filters or None)
-        target = query
+        chunks = retrieve(query, k=k or retrieval_k, filters=effective_filters)
+        target: str | None = query
         scope = "query"
     elif effective_filters:
         chunks = fetch_all_chunks(filters=effective_filters)
-        target = ", ".join(f"{k}={v}" for k, v in effective_filters.items())
+        target = ", ".join(f"{fk}={fv}" for fk, fv in effective_filters.items())
         scope = "document" if document else "filter"
     else:
         chunks = fetch_all_chunks(filters=None)
         target = None
         scope = "corpus"
 
-    return chunks, scope, target or ""
+    return chunks, scope, target
 
 
 def _batch(items: list[RetrievedChunk], size: int) -> list[list[RetrievedChunk]]:
@@ -139,20 +138,7 @@ def summarize(
     filters: dict[str, str | int] | None = None,
     k: int | None = None,
 ) -> Summary:
-    """Generate a grounded study summary for a document, filter, or topic.
-
-    Args:
-        document: Optional filename to scope by.
-        query: Optional topic/question for retrieval-guided summary.
-        filters: Additional metadata filters.
-        k: Retrieval top-k override (query mode only).
-
-    Returns:
-        Summary with grounded text, key points, and citations.
-
-    Raises:
-        GenerationError: If the LLM output cannot be parsed or validated.
-    """
+    """Grounded summary; uses map-reduce when chunk count exceeds batch size."""
     chunks, scope, target = _resolve_target(
         document=document,
         query=query,
@@ -162,23 +148,18 @@ def summarize(
     )
 
     if not chunks:
-        return Summary(
-            scope=scope,
-            target=target or None,
-            summary="",
-            key_points=[],
-            citations=[],
-        )
+        return Summary(scope=scope, target=target, summary="")
 
-    batch_size = max(1, settings.summarize_batch_size)
+    batch_size = settings.summarize_batch_size
     if len(chunks) <= batch_size:
         prompt = render_prompt(SUMMARY_SINGLE_TEMPLATE, chunks=chunks)
         payload = _parse_json(invoke_llm(prompt))
         summary_text, key_points = _validate_summary_payload(payload)
     else:
+        n_batches = (len(chunks) + batch_size - 1) // batch_size
         partials: list[dict] = []
         for i, batch in enumerate(_batch(chunks, batch_size), start=1):
-            logger.info("Summarizing batch {}/{}", i, (len(chunks) + batch_size - 1) // batch_size)
+            logger.info("Summarizing batch {}/{}", i, n_batches)
             prompt = render_prompt(SUMMARY_MAP_TEMPLATE, chunks=batch)
             payload = _parse_json(invoke_llm(prompt))
             s, kp = _validate_summary_payload(payload)
@@ -190,7 +171,7 @@ def summarize(
 
     return Summary(
         scope=scope,
-        target=target or None,
+        target=target,
         summary=summary_text,
         key_points=key_points,
         citations=format_citations(chunks),
@@ -234,21 +215,7 @@ def generate_quiz(
     count: int | None = None,
     k: int | None = None,
 ) -> QuizSet:
-    """Generate a grounded multiple-choice quiz set.
-
-    Args:
-        document: Optional filename scope.
-        query: Optional topic/question for retrieval-guided quiz.
-        filters: Additional metadata filters.
-        count: Number of items to request from the LLM.
-        k: Retrieval top-k override (query mode only).
-
-    Returns:
-        QuizSet with validated items and citations.
-
-    Raises:
-        GenerationError: If no valid items can be parsed from the LLM output.
-    """
+    """Grounded multiple-choice quiz; raises GenerationError if output is unparseable."""
     chunks, scope, target = _resolve_target(
         document=document,
         query=query,
@@ -268,7 +235,7 @@ def generate_quiz(
 
     return QuizSet(
         scope=scope,
-        target=target or None,
+        target=target,
         items=items,
         citations=format_citations(chunks),
     )
@@ -312,21 +279,7 @@ def generate_flashcards(
     count: int | None = None,
     k: int | None = None,
 ) -> FlashcardSet:
-    """Generate a grounded flashcard set for study and spaced repetition.
-
-    Args:
-        document: Optional filename scope.
-        query: Optional topic/question for retrieval-guided flashcards.
-        filters: Additional metadata filters.
-        count: Number of cards to request from the LLM.
-        k: Retrieval top-k override (query mode only).
-
-    Returns:
-        FlashcardSet with validated cards and citations.
-
-    Raises:
-        GenerationError: If no valid cards can be parsed from the LLM output.
-    """
+    """Grounded flashcard set for spaced repetition; raises GenerationError if output is unparseable."""
     chunks, scope, target = _resolve_target(
         document=document,
         query=query,
@@ -346,7 +299,7 @@ def generate_flashcards(
 
     return FlashcardSet(
         scope=scope,
-        target=target or None,
+        target=target,
         cards=cards,
         citations=format_citations(chunks),
     )

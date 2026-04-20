@@ -21,7 +21,7 @@ dependencies = [
     "qdrant-client>=1.17,<2",
     "sentence-transformers>=5.4,<6",
     "torch>=2.4,<3",
-    "transformers>=4.46,<6",
+    "transformers>=4.47.0,<6",
     "typer>=0.24,<0.25",
 ]
 

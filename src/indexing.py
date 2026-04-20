@@ -1,6 +1,8 @@
 """Load PDFs, split into chunks with metadata, and index into Qdrant."""
 
 import hashlib
+import uuid
+from collections import defaultdict
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -35,21 +37,21 @@ def _load_pdf(path: Path) -> list[Document]:
     loader = PyPDFLoader(str(path))
     pages = loader.load()
     doc_id = _document_id(path)
-    for p in pages:
-        page_number = int(p.metadata.get("page", 0)) + 1
-        p.metadata = {
+    for doc in pages:
+        page_number = int(doc.metadata.get("page", 0)) + 1
+        doc.metadata = {
             "document_id": doc_id,
             "filename": path.name,
             "source": str(path.resolve()),
             "page": page_number,
-            "section": p.metadata.get("section"),
+            "section": doc.metadata.get("section"),
         }
     return pages
 
 
 def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
     directory = data_dir or settings.data_dir
-    return sorted(p for p in directory.glob("*.pdf") if p.is_file())
+    return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
 
 
 def build_chunks(pdf_paths: list[Path]) -> list[Document]:
@@ -60,11 +62,11 @@ def build_chunks(pdf_paths: list[Path]) -> list[Document]:
 
     chunks = _splitter().split_documents(page_docs)
 
-    per_doc_counter: dict[str, int] = {}
+    per_doc_counter: dict[str, int] = defaultdict(int)
     for chunk in chunks:
         doc_id = chunk.metadata["document_id"]
-        idx = per_doc_counter.get(doc_id, 0)
-        per_doc_counter[doc_id] = idx + 1
+        idx = per_doc_counter[doc_id]
+        per_doc_counter[doc_id] += 1
         meta = ChunkMetadata(
             document_id=doc_id,
             filename=chunk.metadata["filename"],
@@ -90,7 +92,10 @@ def ingest(recreate: bool = False) -> int:
         logger.warning("No chunks produced from {} PDF(s)", len(pdfs))
         return 0
 
+    # Deterministic UUIDs from chunk_id ensure upsert semantics: re-ingesting the same
+    # file without --recreate overwrites existing points instead of creating duplicates.
+    ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks]
     store = get_vector_store()
-    store.add_documents(chunks)
+    store.add_documents(chunks, ids=ids)
     logger.info("Ingested {} chunks from {} PDF(s)", len(chunks), len(pdfs))
     return len(chunks)

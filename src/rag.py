@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from qdrant_client.http import models as qmodels
@@ -89,7 +89,11 @@ def fetch_all_chunks(
         offset = next_offset
 
     results.sort(
-        key=lambda r: (r.metadata.filename, r.metadata.page, r.metadata.chunk_id)
+        key=lambda r: (
+            r.metadata.filename,
+            r.metadata.page,
+            int(r.metadata.chunk_id.rsplit(":", 1)[-1]),
+        )
     )
     return results
 
@@ -98,15 +102,11 @@ def fetch_all_chunks(
 def _jinja_env() -> Environment:
     return Environment(
         loader=FileSystemLoader(str(PROMPTS_DIR)),
-        autoescape=select_autoescape(disabled_extensions=("jinja2",), default=False),
+        autoescape=False,
         undefined=StrictUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
     )
-
-
-def render_answer_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
-    return _jinja_env().get_template(ANSWER_TEMPLATE).render(question=question, chunks=chunks)
 
 
 def render_prompt(template_name: str, **context: object) -> str:
@@ -127,33 +127,34 @@ def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
         for i, c in enumerate(chunks, start=1)
     ]
 
+
 def _build_hf_local() -> BaseChatModel:
     """Build a chat model backed by a local Transformers pipeline."""
+    import torch
     from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-    import torch
 
     do_sample = settings.llm_temperature > 0
-    pipeline_kwargs: dict = {
-        "max_new_tokens": settings.hf_max_new_tokens,
-        "do_sample": do_sample, "max_length": None,
-        "return_full_text": False,
-    }
-    if do_sample:
-        pipeline_kwargs["temperature"] = settings.llm_temperature
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
         model = AutoModelForCausalLM.from_pretrained(settings.hf_model, dtype=torch.bfloat16)
+        model.generation_config.max_length = None
 
         text_gen_pipeline = pipeline(
             task="text-generation",
             model=model,
             tokenizer=tokenizer,
             device=settings.hf_device,
-            **pipeline_kwargs,
+            return_full_text=False,
         )
-        llm = HuggingFacePipeline(pipeline=text_gen_pipeline, pipeline_kwargs=pipeline_kwargs)
+        text_gen_pipeline.generation_config.max_new_tokens = settings.hf_max_new_tokens
+        text_gen_pipeline.generation_config.max_length = None
+        text_gen_pipeline.generation_config.do_sample = do_sample
+        if do_sample:
+            text_gen_pipeline.generation_config.temperature = settings.llm_temperature
+
+        llm = HuggingFacePipeline(pipeline=text_gen_pipeline)
     except Exception as e:
         raise RuntimeError(
             f"Failed to load Hugging Face model '{settings.hf_model}': {e}"
@@ -163,7 +164,6 @@ def _build_hf_local() -> BaseChatModel:
 
 
 def _build_gemini() -> BaseChatModel:
-    """Build a Gemini chat model."""
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     if not settings.google_api_key:
@@ -190,7 +190,6 @@ def _llm() -> BaseChatModel:
 
 
 def invoke_llm(prompt: str) -> str:
-    """Invoke the configured chat model with a single user prompt and return text."""
     response = _llm().invoke([HumanMessage(content=prompt)])
     return response.content if isinstance(response.content, str) else str(response.content)
 
@@ -204,12 +203,10 @@ def answer(
     if not chunks:
         return RagAnswer(
             question=question,
-            answer="I don't have enough information in the provided context to answer.",
-            citations=[],
-            chunks=[],
+            answer="Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời.",
         )
 
-    prompt = render_answer_prompt(question, chunks)
+    prompt = render_prompt(ANSWER_TEMPLATE, question=question, chunks=chunks)
     text = invoke_llm(prompt)
 
     return RagAnswer(

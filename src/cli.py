@@ -7,12 +7,11 @@ import typer
 from loguru import logger
 
 from src.export import (
-    flashcards_to_markdown,
-    quiz_to_markdown,
-    summary_to_markdown,
+    model_to_text,
     to_json,
     write_json,
     write_markdown,
+    write_text,
 )
 from src.indexing import ingest as run_ingest
 from src.learning import (
@@ -22,7 +21,7 @@ from src.learning import (
     summarize,
 )
 from src.rag import answer as run_answer, retrieve
-from src.schemas import FlashcardSet, QuizSet, Summary
+from src.schemas import RetrievedChunk
 from src.store import close_client
 
 app = typer.Typer(
@@ -45,7 +44,7 @@ def _print_answer(text: str) -> None:
     typer.echo()
 
 
-def _print_sources(chunks: list) -> None:
+def _print_sources(chunks: list[RetrievedChunk]) -> None:
     if not chunks:
         return
     _print_section("Sources")
@@ -80,26 +79,17 @@ def _validate_format(fmt: str) -> str:
     return fmt
 
 
-def _write_output(model, path: Path, fmt: str) -> None:
-    if fmt == "json":
-        written = write_json(model, path)
-    elif fmt == "md":
-        written = write_markdown(model, path)
-    else:
-        written = path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_render_text(model), encoding="utf-8")
-    typer.echo(f"Wrote {written}")
-
-
-def _render_text(model) -> str:
-    if isinstance(model, Summary):
-        return summary_to_markdown(model)
-    if isinstance(model, QuizSet):
-        return quiz_to_markdown(model)
-    if isinstance(model, FlashcardSet):
-        return flashcards_to_markdown(model)
-    return to_json(model)
+def _emit(model, output: Path | None, fmt: str) -> None:
+    if output:
+        if fmt == "json":
+            written = write_json(model, output)
+        elif fmt == "md":
+            written = write_markdown(model, output)
+        else:
+            written = write_text(output, model_to_text(model))
+        typer.echo(f"Wrote {written}")
+        return
+    typer.echo(to_json(model) if fmt == "json" else model_to_text(model))
 
 
 @app.command()
@@ -193,14 +183,7 @@ def summarize_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
-    if output:
-        _write_output(result, output, fmt)
-        return
-
-    if fmt == "json":
-        typer.echo(to_json(result))
-    else:
-        typer.echo(summary_to_markdown(result))
+    _emit(result, output, fmt)
 
 
 @app.command("quiz")
@@ -229,14 +212,7 @@ def quiz_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
-    if output:
-        _write_output(result, output, fmt)
-        return
-
-    if fmt == "json":
-        typer.echo(to_json(result))
-    else:
-        typer.echo(quiz_to_markdown(result))
+    _emit(result, output, fmt)
 
 
 @app.command("flashcards")
@@ -265,14 +241,7 @@ def flashcards_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
-    if output:
-        _write_output(result, output, fmt)
-        return
-
-    if fmt == "json":
-        typer.echo(to_json(result))
-    else:
-        typer.echo(flashcards_to_markdown(result))
+    _emit(result, output, fmt)
 
 
 def main() -> None:

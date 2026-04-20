@@ -94,13 +94,15 @@ Runs a Transformers text-generation pipeline locally through LangChain's `ChatHu
 - No network or API key is required after model weights are cached.
 - The first run downloads the model to `~/.cache/huggingface`.
 
-Configurable in `src/config.py`:
+Configurable via environment variables (or `src/config.py`):
 
-- `hf_model` — default `Qwen/Qwen2.5-1.5B-Instruct`
-- `hf_device` — `-1` for CPU, `0+` for a CUDA device index
-- `hf_max_new_tokens` — default `512`
-- `hf_dtype` — for example `"float16"`, `"bfloat16"`, or `None`
-- `llm_temperature` — shared across providers
+| Setting | Env var | Default |
+| --- | --- | --- |
+| Model ID or local path | `HF_MODEL` | `Qwen/Qwen2.5-1.5B-Instruct` |
+| Device | `HF_DEVICE` | `-1` (CPU); use `0`, `1`, … for CUDA |
+| Max new tokens | — | `512` |
+| dtype | — | `bfloat16` |
+| Temperature | — | `0.1` (shared across providers) |
 
 Example:
 

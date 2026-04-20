@@ -1,0 +1,33 @@
+You are generating study flashcards grounded in the provided context.
+
+Rules:
+- Generate exactly {{ count }} flashcards.
+- Fronts should ask for a concept, term, distinction, formula, process, or short explanation.
+- Backs must be concise but complete enough for revision.
+- Ground every card in the context. Do not invent facts.
+- Avoid low-value cards that only restate section headings.
+- Avoid duplicate or overly similar cards.
+- Provide at least one [S#] source marker per card when possible.
+- If the context is insufficient for {{ count }} useful cards, produce fewer rather than pad.
+
+Output STRICTLY valid JSON and no other text, with this exact shape:
+{
+  "cards": [
+    {
+      "front": "string",
+      "back": "string",
+      "hint": "optional string or null",
+      "topic": "optional short topic label or null",
+      "source_markers": ["S1"]
+    }
+  ]
+}
+
+Context:
+{% for c in chunks %}
+---
+[source=S{{ loop.index }}] ({{ c.metadata.filename }} p.{{ c.metadata.page }})
+{{ c.text }}
+{% endfor %}
+
+Respond with ONLY the JSON object.

@@ -24,15 +24,14 @@ def _print_answer(text: str) -> None:
     typer.echo(text.strip())
     typer.echo()
     
-def _print_sources(chunks: list) -> None:
-    if not chunks:
+def _print_sources(citations: list) -> None:
+    if not citations:
         return
     _print_section("Sources")
-    for i, chunk in enumerate(chunks, start=1):
-        meta = chunk.metadata
-        line = f"[S{i}] {meta.filename} p.{meta.page}"
-        if meta.section:
-            line += f" | {meta.section}"
+    for citation in citations:
+        line = f"[{citation.source_marker}] {citation.filename} p.{citation.page}"
+        if citation.section:
+            line += f" | {citation.section}"
         typer.echo(line)
         
         
@@ -61,8 +60,8 @@ def ingest(
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="The user question."),
-    k: int = typer.Option(None, "--k", help="Number of chunks to retrieve."),
-    filter: list[str] = typer.Option(
+    k: int | None = typer.Option(None, "--k", help="Number of chunks to retrieve."),
+    doc_filter: list[str] | None = typer.Option(
         None,
         "--filter",
         "-f",
@@ -70,15 +69,15 @@ def ask(
     ),
 ) -> None:
     """Answer a question using retrieved context only."""
-    result = run_answer(question, k=k, filters=_parse_filters(filter))
+    result = run_answer(question, k=k, filters=_parse_filters(doc_filter))
     _print_answer(result.answer)
-    _print_sources(result.chunks)
+    _print_sources(result.citations)
 
 @app.command("debug-retrieval")
 def debug_retrieval(
     question: str = typer.Argument(..., help="Query to retrieve chunks for."),
-    k: int = typer.Option(None, "--k", help="Number of chunks to retrieve."),
-    filter: list[str] = typer.Option(
+    k: int | None = typer.Option(None, "--k", help="Number of chunks to retrieve."),
+    doc_filter: list[str] | None = typer.Option(
         None,
         "--filter",
         "-f",
@@ -87,7 +86,7 @@ def debug_retrieval(
     as_json: bool = typer.Option(False, "--json", help="Emit JSON output."),
 ) -> None:
     """Print top retrieved chunks with scores and metadata, without calling the LLM."""
-    chunks = retrieve(question, k=k, filters=_parse_filters(filter))
+    chunks = retrieve(question, k=k, filters=_parse_filters(doc_filter))
 
     if as_json:
         payload = [c.model_dump() for c in chunks]

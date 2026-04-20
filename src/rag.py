@@ -69,15 +69,24 @@ def render_answer_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
 
 
 def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
+    """Build citations in prompt source-marker order ([S1], [S2], …).
+
+    The Jinja2 template assigns ``[S{loop.index}]`` to each chunk in order, so
+    the ``source_marker`` on each ``Citation`` directly corresponds to the inline
+    reference the LLM was instructed to use.  When multiple chunks share the same
+    (filename, page) pair the first occurrence's marker is kept and later
+    duplicates are skipped.
+    """
     seen: set[tuple[str, int]] = set()
     citations: list[Citation] = []
-    for c in chunks:
+    for idx, c in enumerate(chunks, start=1):
         key = (c.metadata.filename, c.metadata.page)
         if key in seen:
             continue
         seen.add(key)
         citations.append(
             Citation(
+                source_marker=f"S{idx}",
                 filename=c.metadata.filename,
                 page=c.metadata.page,
                 section=c.metadata.section,

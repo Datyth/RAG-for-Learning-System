@@ -25,6 +25,7 @@ class RetrievedChunk(BaseModel):
 class Citation(BaseModel):
     """Citation extracted from a retrieved chunk's metadata."""
 
+    source_marker: str  # e.g. "S1", "S2" — matches inline markers in the answer
     filename: str
     page: int
     section: str | None = None

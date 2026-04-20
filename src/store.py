@@ -26,6 +26,9 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     )
 
 def close_client() -> None:
+    """Close the Qdrant client only if it has already been instantiated."""
+    if get_client.cache_info().currsize == 0:
+        return
     client = get_client()
     client.close()
     get_client.cache_clear()

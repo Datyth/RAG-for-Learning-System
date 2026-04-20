@@ -1,4 +1,4 @@
-"""Application configuration"""
+"""Application configuration. Defaults live here; secrets come from .env."""
 
 from dataclasses import dataclass
 from os import getenv
@@ -9,23 +9,32 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _google_api_key() -> str | None:
-    k = getenv("GOOGLE_API_KEY")
-    return k.strip() if k else None
+def _env(name: str) -> str | None:
+    v = getenv(name)
+    return v.strip() if v and v.strip() else None
 
 
 @dataclass(frozen=True)
 class Settings:
     """Options are defined below. Put secrets in `.env`."""
+
     data_dir: Path
     storage_dir: Path
     qdrant_collection: str
     chunk_size: int
     chunk_overlap: int
     embedding_model: str
-    llm_model: str
-    llm_temperature: float
     top_k: int
+
+    llm_provider: str  # "hf_local" | "gemini"
+    llm_temperature: float
+
+    hf_model: str
+    hf_device: int          # -1 = CPU, 0+ = CUDA device index
+    hf_max_new_tokens: int
+    hf_dtype: str | None    # e.g. "float16", "bfloat16"; None keeps framework default
+
+    gemini_model: str
     google_api_key: str | None
 
 
@@ -36,8 +45,13 @@ settings = Settings(
     chunk_size=1000,
     chunk_overlap=150,
     embedding_model="GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1",
-    llm_model="gemini-2.5-flash",
-    llm_temperature=0.1,
     top_k=5,
-    google_api_key=_google_api_key(),
+    llm_provider=(_env("LLM_PROVIDER") or "hf_local").lower(),
+    llm_temperature=0.1,
+    hf_model="/mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507",
+    hf_device=1,
+    hf_max_new_tokens=512,
+    hf_dtype="bfloat16",
+    gemini_model="gemini-2.5-flash",
+    google_api_key=_env("GOOGLE_API_KEY"),
 )

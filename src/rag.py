@@ -4,8 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from qdrant_client.http import models as qmodels
 
 from src.config import settings
@@ -87,16 +87,66 @@ def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
     return citations
 
 
-@lru_cache(maxsize=1)
-def _llm() -> ChatGoogleGenerativeAI:
+def _build_hf_local() -> BaseChatModel:
+    """Build a chat model backed by a local Transformers pipeline."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+    from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
+
+    model_kwargs: dict = {}
+    if settings.hf_dtype:
+        model_kwargs["dtype"] = settings.hf_dtype
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
+        model = AutoModelForCausalLM.from_pretrained(
+            settings.hf_model,
+            **model_kwargs,
+        )
+        model.generation_config.max_new_tokens = settings.hf_max_new_tokens
+        model.generation_config.do_sample = settings.llm_temperature > 0
+        model.generation_config.temperature = settings.llm_temperature
+
+        text_gen_pipeline = pipeline(
+            task="text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            device=settings.hf_device,
+            return_full_text=False,
+        )
+
+        llm = HuggingFacePipeline(pipeline=text_gen_pipeline)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load Hugging Face model '{settings.hf_model}': {e}"
+        ) from e
+
+    return ChatHuggingFace(llm=llm)
+
+
+def _build_gemini() -> BaseChatModel:
+    """Build a Gemini chat model."""
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
     if not settings.google_api_key:
         raise RuntimeError(
-            "GOOGLE_API_KEY is not set. Add it to .env before calling the LLM."
+            "GOOGLE_API_KEY is not set. Add it to .env before using provider 'gemini'."
         )
     return ChatGoogleGenerativeAI(
-        model=settings.llm_model,
+        model=settings.gemini_model,
         temperature=settings.llm_temperature,
         google_api_key=settings.google_api_key,
+    )
+
+
+@lru_cache(maxsize=1)
+def _llm() -> BaseChatModel:
+    provider = settings.llm_provider
+    if provider == "hf_local":
+        return _build_hf_local()
+    if provider == "gemini":
+        return _build_gemini()
+    raise ValueError(
+        f"Unknown LLM_PROVIDER '{provider}'. Expected 'hf_local' or 'gemini'."
     )
 
 

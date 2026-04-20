@@ -61,8 +61,8 @@ def ingest(
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="The user question."),
-    k: int = typer.Option(None, "--k", help="Number of chunks to retrieve."),
-    filter: list[str] = typer.Option(
+    k: int | None = typer.Option(None, "--k", help="Number of chunks to retrieve."),
+    filters: list[str] | None = typer.Option(
         None,
         "--filter",
         "-f",
@@ -70,15 +70,16 @@ def ask(
     ),
 ) -> None:
     """Answer a question using retrieved context only."""
-    result = run_answer(question, k=k, filters=_parse_filters(filter))
+    result = run_answer(question, k=k, filters=_parse_filters(filters))
     _print_answer(result.answer)
     _print_sources(result.chunks)
+
 
 @app.command("debug-retrieval")
 def debug_retrieval(
     question: str = typer.Argument(..., help="Query to retrieve chunks for."),
-    k: int = typer.Option(None, "--k", help="Number of chunks to retrieve."),
-    filter: list[str] = typer.Option(
+    k: int | None = typer.Option(None, "--k", help="Number of chunks to retrieve."),
+    filters: list[str] | None = typer.Option(
         None,
         "--filter",
         "-f",
@@ -87,7 +88,7 @@ def debug_retrieval(
     as_json: bool = typer.Option(False, "--json", help="Emit JSON output."),
 ) -> None:
     """Print top retrieved chunks with scores and metadata, without calling the LLM."""
-    chunks = retrieve(question, k=k, filters=_parse_filters(filter))
+    chunks = retrieve(question, k=k, filters=_parse_filters(filters))
 
     if as_json:
         payload = [c.model_dump() for c in chunks]
@@ -105,8 +106,6 @@ def debug_retrieval(
             + (f" | section={c.metadata.section}" if c.metadata.section else "")
         )
         preview = c.text.strip().replace("\n", " ")
-        if len(preview) > 240:
-            preview = preview[:240] + "..."
         typer.echo(f"    {preview}\n")
 
 

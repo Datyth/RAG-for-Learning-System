@@ -26,6 +26,8 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     )
 
 def close_client() -> None:
+    if get_client.cache_info().currsize == 0:
+        return
     client = get_client()
     client.close()
     get_client.cache_clear()
@@ -61,15 +63,24 @@ def ensure_collection(recreate: bool = False) -> None:
             ),
         )
 
+    payload_schema = client.get_collection(name).payload_schema or {}
+
     for field_name, field_schema in INDEXED_PAYLOAD_FIELDS.items():
-        try:
+        existing = payload_schema.get(field_name)
+        if existing is None:
             client.create_payload_index(
                 collection_name=name,
                 field_name=field_name,
                 field_schema=field_schema,
             )
-        except Exception:
-            pass
+            continue
+
+        existing_schema = getattr(existing, "data_type", None)
+        if existing_schema != field_schema:
+            raise ValueError(
+                f"Payload index for '{field_name}' has schema "
+                f"{existing_schema!r}, expected {field_schema!r}."
+            )
 
 
 def get_vector_store() -> QdrantVectorStore:

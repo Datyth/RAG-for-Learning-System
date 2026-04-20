@@ -25,10 +25,12 @@ class RetrievedChunk(BaseModel):
 class Citation(BaseModel):
     """Citation extracted from a retrieved chunk's metadata."""
 
+    source_index: int
+    source_marker: str
     filename: str
     page: int
     section: str | None = None
-    chunk_id: str
+    chunk_id: str | None = None
 
 
 class RagAnswer(BaseModel):

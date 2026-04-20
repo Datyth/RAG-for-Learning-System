@@ -69,22 +69,17 @@ def render_answer_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
 
 
 def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
-    seen: set[tuple[str, int]] = set()
-    citations: list[Citation] = []
-    for c in chunks:
-        key = (c.metadata.filename, c.metadata.page)
-        if key in seen:
-            continue
-        seen.add(key)
-        citations.append(
-            Citation(
-                filename=c.metadata.filename,
-                page=c.metadata.page,
-                section=c.metadata.section,
-                chunk_id=c.metadata.chunk_id,
-            )
+    return [
+        Citation(
+            source_index=i,
+            source_marker=f"S{i}",
+            filename=c.metadata.filename,
+            page=c.metadata.page,
+            section=c.metadata.section,
+            chunk_id=c.metadata.chunk_id,
         )
-    return citations
+        for i, c in enumerate(chunks, start=1)
+    ]
 
 def _build_hf_local() -> BaseChatModel:
     """Build a chat model backed by a local Transformers pipeline."""

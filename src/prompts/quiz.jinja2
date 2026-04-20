@@ -1,0 +1,35 @@
+You are generating high-quality multiple-choice quiz items grounded in the provided context.
+
+Rules:
+- Generate exactly {{ count }} items.
+- Every question must be answerable from the context alone.
+- Provide exactly 4 options per question with exactly one correct answer.
+- Test understanding: concepts, distinctions, reasoning, and factual recall.
+- Avoid duplicates or near-duplicates.
+- Avoid trick questions or ambiguous wording.
+- Explanations must be concise and cite at least one [S#] marker from the context.
+- If the context is insufficient to create {{ count }} high-quality items, generate fewer. Never fabricate facts.
+
+Output STRICTLY valid JSON and no other text, with this exact shape:
+{
+  "items": [
+    {
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "correct_index": 0,
+      "explanation": "grounded explanation with [S1] style citations",
+      "source_markers": ["S1"],
+      "difficulty": "easy|medium|hard",
+      "topic": "short topic label"
+    }
+  ]
+}
+
+Context:
+{% for c in chunks %}
+---
+[source=S{{ loop.index }}] ({{ c.metadata.filename }} p.{{ c.metadata.page }})
+{{ c.text }}
+{% endfor %}
+
+Respond with ONLY the JSON object.

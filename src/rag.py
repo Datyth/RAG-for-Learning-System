@@ -10,10 +10,11 @@ from qdrant_client.http import models as qmodels
 
 from src.config import settings
 from src.schemas import ChunkMetadata, Citation, RagAnswer, RetrievedChunk
-from src.store import get_vector_store
+from src.store import get_client, get_vector_store
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 ANSWER_TEMPLATE = "answer.jinja2"
+SCROLL_PAGE_SIZE = 256
 
 
 def _metadata_filter(filters: dict[str, str | int] | None) -> qmodels.Filter | None:
@@ -53,6 +54,46 @@ def retrieve(
     ]
 
 
+def fetch_all_chunks(
+    filters: dict[str, str | int] | None = None,
+) -> list[RetrievedChunk]:
+    """Scroll every chunk in the collection matching the filter, ordered by page."""
+    client = get_client()
+    q_filter = _metadata_filter(filters)
+    results: list[RetrievedChunk] = []
+    offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=settings.qdrant_collection,
+            scroll_filter=q_filter,
+            limit=SCROLL_PAGE_SIZE,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in points:
+            payload = point.payload or {}
+            meta = payload.get("metadata") or {}
+            text = payload.get("page_content") or ""
+            if not meta or not text:
+                continue
+            results.append(
+                RetrievedChunk(
+                    text=text,
+                    score=0.0,
+                    metadata=ChunkMetadata(**meta),
+                )
+            )
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    results.sort(
+        key=lambda r: (r.metadata.filename, r.metadata.page, r.metadata.chunk_id)
+    )
+    return results
+
+
 @lru_cache(maxsize=1)
 def _jinja_env() -> Environment:
     return Environment(
@@ -66,6 +107,11 @@ def _jinja_env() -> Environment:
 
 def render_answer_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     return _jinja_env().get_template(ANSWER_TEMPLATE).render(question=question, chunks=chunks)
+
+
+def render_prompt(template_name: str, **context: object) -> str:
+    """Render an arbitrary Jinja template from the prompts directory."""
+    return _jinja_env().get_template(template_name).render(**context)
 
 
 def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
@@ -85,25 +131,29 @@ def _build_hf_local() -> BaseChatModel:
     """Build a chat model backed by a local Transformers pipeline."""
     from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+    import torch
 
-    model_kwargs: dict = {}
-    model_kwargs["dtype"] = torch.bfloat16
+    do_sample = settings.llm_temperature > 0
+    pipeline_kwargs: dict = {
+        "max_new_tokens": settings.hf_max_new_tokens,
+        "do_sample": do_sample, "max_length": None,
+        "return_full_text": False,
+    }
+    if do_sample:
+        pipeline_kwargs["temperature"] = settings.llm_temperature
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
-        model = AutoModelForCausalLM.from_pretrained(settings.hf_model, **model_kwargs)
-        model.generation_config.max_new_tokens = settings.hf_max_new_tokens
-        model.generation_config.do_sample = settings.llm_temperature > 0
-        model.generation_config.temperature = settings.llm_temperature
+        model = AutoModelForCausalLM.from_pretrained(settings.hf_model, dtype=torch.bfloat16)
 
         text_gen_pipeline = pipeline(
             task="text-generation",
             model=model,
             tokenizer=tokenizer,
             device=settings.hf_device,
-            return_full_text=False,
+            **pipeline_kwargs,
         )
-        llm = HuggingFacePipeline(pipeline=text_gen_pipeline)
+        llm = HuggingFacePipeline(pipeline=text_gen_pipeline, pipeline_kwargs=pipeline_kwargs)
     except Exception as e:
         raise RuntimeError(
             f"Failed to load Hugging Face model '{settings.hf_model}': {e}"
@@ -139,6 +189,12 @@ def _llm() -> BaseChatModel:
     )
 
 
+def invoke_llm(prompt: str) -> str:
+    """Invoke the configured chat model with a single user prompt and return text."""
+    response = _llm().invoke([HumanMessage(content=prompt)])
+    return response.content if isinstance(response.content, str) else str(response.content)
+
+
 def answer(
     question: str,
     k: int | None = None,
@@ -154,8 +210,7 @@ def answer(
         )
 
     prompt = render_answer_prompt(question, chunks)
-    response = _llm().invoke([HumanMessage(content=prompt)])
-    text = response.content if isinstance(response.content, str) else str(response.content)
+    text = invoke_llm(prompt)
 
     return RagAnswer(
         question=question,

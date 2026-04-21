@@ -8,7 +8,6 @@
 > A local Retrieval-Augmented Generation pipeline for studying PDF documents.
 > Generates grounded answers, summaries, quizzes, and flashcards.
 
-
 ## Table of Contents
 
 - [Features](#features)
@@ -32,30 +31,61 @@
 - Vietnamese output across all LLM responses
 - JSON and Markdown export for all learning outputs
 - Two LLM backends: local HuggingFace (default) and Google Gemini
-- Interactive web UI (Streamlit) with chat, summary, quiz, and flashcard tabs
+- Interactive web UI (Streamlit) — calls FastAPI backend via HTTP
 - REST API (FastAPI) for programmatic access — Swagger UI at `/docs`
 
 
 ## Architecture
 
+<details>
+<summary><b>Ingest pipeline</b></summary>
+
 ```mermaid
 flowchart LR
-    subgraph Ingest
-        A([PDF Files]) --> B[PyPDFLoader]
-        B --> C[Text Splitter]
-        C --> D[HF Embeddings]
-        D --> E[(Qdrant\non-disk)]
-    end
-
-    subgraph Query
-        F([Question]) --> G[Vector Search]
-        E --> G
-        G --> H[Top-K Chunks]
-        H --> I[Jinja2 Prompt]
-        I --> J[LLM]
-        J --> K([Output\nVietnamese])
-    end
+    PDF["PDF files (data/)"] --> IDX["indexing.py\nPyPDFLoader + Splitter"]
+    IDX --> EMB["store.py\nHuggingFaceEmbeddings"]
+    EMB --> QD[("Qdrant\nstorage/qdrant/")]
 ```
+
+</details>
+
+<details>
+<summary><b>Query pipeline</b></summary>
+
+```mermaid
+flowchart TD
+    Input(["Question / Document"])
+    RAG["rag.py — retrieve · render_prompt · invoke_llm"]
+    LRN["learning.py — summarize · quiz · flashcards"]
+    SVC["services.py — unified service layer"]
+    API["FastAPI :8000"]
+    CLI["CLI — Typer"]
+    UI["Streamlit UI — httpx"]
+
+    Input --> RAG & LRN
+    RAG & LRN --> SVC
+    SVC --> API & CLI
+    API --> UI
+```
+
+</details>
+
+<details>
+<summary><b>Layer responsibilities</b></summary>
+
+| File | Responsibility |
+|------|---------------|
+| `src/config.py` | Frozen `Settings` dataclass — all runtime parameters |
+| `src/schemas.py` | Pydantic models for all inputs and outputs |
+| `src/store.py` | `@lru_cache` singletons: Qdrant client, embeddings, vector store |
+| `src/rag.py` | Retrieval, prompt rendering, LLM invocation, citation parsing |
+| `src/learning.py` | Summarize (map/reduce), quiz, flashcard generation |
+| `src/services.py` | Service layer shared by FastAPI and CLI |
+| `src/export.py` | JSON and Markdown serialization |
+| `src/interfaces/` | CLI (Typer), API (FastAPI), UI (Streamlit via HTTP) |
+| `src/prompts/` | Jinja2 prompt templates |
+
+</details>
 
 
 ## Quick Start
@@ -64,18 +94,18 @@ flowchart LR
 # 1. Install dependencies
 uv sync
 
-# 2. Configure secrets  (Gemini only — skip if using local HF)
+# 2. Configure secrets (Gemini only — skip if using local HF)
 cp .env.example .env
 
 # 3. Place PDFs in ./data/, then ingest
 uv run rag ingest
 
-# 4. Ask a question
+# 4. Ask a question via CLI
 uv run rag ask "What is LoRA fine-tuning?"
 
-# 5. (optional) Run the web UI or REST API
+# 5. Web UI — start API first, then Streamlit
+uv run rag-api &
 uv run streamlit run src/interfaces/ui.py   # http://localhost:8501
-uv run rag-api                              # http://localhost:8000 — Swagger at /docs
 ```
 
 
@@ -121,9 +151,8 @@ All learning commands (`summarize`, `quiz`, `flashcards`) share these scoping fl
 
 With no scope options, commands run over the entire corpus.
 
-
 <details>
-<summary><strong>rag ingest</strong> — Index PDFs into Qdrant</summary>
+<summary><b>rag ingest</b> — Index PDFs into Qdrant</summary>
 
 ```bash
 uv run rag ingest
@@ -133,7 +162,7 @@ uv run rag ingest --recreate        # drop and rebuild the collection
 </details>
 
 <details>
-<summary><strong>rag ask</strong> — Grounded Q&A</summary>
+<summary><b>rag ask</b> — Grounded Q&A</summary>
 
 ```bash
 uv run rag ask "What is RLHF?"
@@ -141,13 +170,12 @@ uv run rag ask "Explain reward modeling" --k 8
 uv run rag ask "What is on page 3?" -f filename="paper.pdf" -f page=3
 ```
 
-If no relevant context is found, the system replies:
-> "Tôi không có đủ thông tin trong ngữ cảnh được cung cấp để trả lời."
+If no relevant context is found, the system replies in Vietnamese indicating insufficient context.
 
 </details>
 
 <details>
-<summary><strong>rag summarize</strong> — Study-oriented summaries</summary>
+<summary><b>rag summarize</b> — Study-oriented summaries</summary>
 
 Automatically switches to map/reduce when chunk count exceeds `summarize_batch_size`.
 
@@ -160,7 +188,7 @@ uv run rag summarize -d paper.pdf -o exports/summary.md --format md
 </details>
 
 <details>
-<summary><strong>rag quiz</strong> — Multiple-choice quiz generation</summary>
+<summary><b>rag quiz</b> — Multiple-choice quiz generation</summary>
 
 Produces structured items with answer, explanation, difficulty, topic tag, and source markers.
 
@@ -173,7 +201,7 @@ uv run rag quiz -f filename="paper.pdf" -f page=3 -n 4
 </details>
 
 <details>
-<summary><strong>rag flashcards</strong> — Spaced-repetition flashcards</summary>
+<summary><b>rag flashcards</b> — Spaced-repetition flashcards</summary>
 
 Each card includes front, back, optional hint, topic tag, and source markers.
 
@@ -185,7 +213,7 @@ uv run rag flashcards --query "PEFT methods" -n 12 --format md -o exports/cards.
 </details>
 
 <details>
-<summary><strong>rag debug-retrieval</strong> — Inspect raw retrieval results</summary>
+<summary><b>rag debug-retrieval</b> — Inspect raw retrieval results</summary>
 
 Shows scores, metadata, and chunk previews without calling the LLM.
 
@@ -202,35 +230,30 @@ uv run rag debug-retrieval "GPT pretraining" --k 10 --json
 <details>
 <summary>FastAPI endpoints and example requests</summary>
 
-A thin FastAPI layer exposes the same core services as the CLI. All endpoints
-return JSON; retrieval results, citations, and validation errors mirror the
-CLI output.
-
 ```bash
 uv run rag-api
-# or with hot-reload for development:
+# hot-reload for development:
 uv run uvicorn src.interfaces.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs).
+Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-| Method | Path           | Purpose                                                 |
-|--------|----------------|---------------------------------------------------------|
-| GET    | `/health`      | Liveness probe                                          |
-| GET    | `/documents`   | List indexed documents (filename, pages, chunk counts)  |
-| POST   | `/upload`      | Upload and ingest a single PDF (multipart/form-data)    |
-| POST   | `/ask`         | Grounded Q&A with citations                             |
-| POST   | `/summarize`   | Study-oriented summary (document / query / filter)      |
-| POST   | `/quiz`        | Multiple-choice quiz generation                         |
-| POST   | `/flashcards`  | Flashcard generation                                    |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Liveness probe |
+| GET | `/documents` | List indexed documents (filename, pages, chunk counts) |
+| POST | `/upload` | Upload and ingest a single PDF (multipart/form-data) |
+| POST | `/ask` | Grounded Q&A with citations |
+| POST | `/summarize` | Study-oriented summary (document / query / filter) |
+| POST | `/quiz` | Multiple-choice quiz generation |
+| POST | `/flashcards` | Flashcard generation |
 
 <details>
 <summary>Example request bodies</summary>
 
 ```jsonc
 // POST /ask
-{ "question": "What is RLHF?", "k": 6,
-  "filters": { "filename": "paper.pdf" } }
+{ "question": "What is RLHF?", "k": 6, "filters": { "filename": "paper.pdf" } }
 
 // POST /summarize
 { "document": "paper.pdf", "query": "LoRA", "k": 12 }
@@ -243,7 +266,6 @@ Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs).
 ```
 
 </details>
-
 </details>
 
 
@@ -252,15 +274,19 @@ Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs).
 <details>
 <summary>Local web interface for study sessions</summary>
 
-A study-oriented UI. All user-facing labels are in Vietnamese.
+The UI calls the FastAPI backend via HTTP. Start the API before launching the UI.
 
 ```bash
-uv run streamlit run src/interfaces/ui.py
+uv run rag-api &
+uv run streamlit run src/interfaces/ui.py   # http://localhost:8501
+
+# Custom API URL
+RAG_API_URL=http://localhost:8000 uv run streamlit run src/interfaces/ui.py
 ```
 
 Features:
 
-- Upload PDFs (auto-ingested into Qdrant)
+- Upload PDFs (auto-ingested into Qdrant via API)
 - Select an indexed document, optionally filter by page
 - Chat-style Q&A with source/citation panel and chunk previews
 - Card-by-card flashcard study mode with flip interaction
@@ -283,7 +309,7 @@ Features:
 
 Set `hf_model` to a local path or model ID, `hf_device` to your CUDA index (or `-1` for CPU).
 
-Generation parameters (`max_new_tokens`, `temperature`, `do_sample`) are applied directly to the pipeline's `generation_config` after construction to avoid deprecation warnings from passing them alongside `generation_config`.
+Generation parameters (`max_new_tokens`, `temperature`, `do_sample`) are applied directly to the pipeline's `generation_config` after construction to avoid deprecation warnings.
 
 </details>
 
@@ -318,7 +344,7 @@ src/
 └── interfaces/
     ├── api.py          # FastAPI app — thin HTTP layer
     ├── cli.py          # Typer CLI — 6 commands
-    ├── ui.py           # Streamlit UI (Vietnamese)
+    ├── ui.py           # Streamlit UI — calls API via HTTP
     └── styles.py       # Custom CSS for the Streamlit app
 data/                   # Input PDFs
 storage/qdrant/         # On-disk vector store (not committed)

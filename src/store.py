@@ -22,6 +22,7 @@ INDEXED_PAYLOAD_FIELDS: dict[str, qmodels.PayloadSchemaType] = {
 def get_embeddings() -> HuggingFaceEmbeddings:
     return HuggingFaceEmbeddings(
         model_name=settings.embedding_model,
+        model_kwargs={"device": settings.hf_device},
         encode_kwargs={"normalize_embeddings": True},
     )
 

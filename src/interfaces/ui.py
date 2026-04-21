@@ -1,37 +1,52 @@
-"""Streamlit UI for the RAG learning system.
+"""Streamlit UI — pure frontend, calls FastAPI backend via HTTP.
 
 Run with:
     uv run streamlit run src/interfaces/ui.py
 
-All user-facing text is in Vietnamese. Business logic lives in src.services.
+Requires the API to be running:
+    uv run rag-api
+
+Override API URL with RAG_API_URL env var (default: http://localhost:8000).
+All user-facing text is in Vietnamese.
 """
 
 import html
+import os
+
+import httpx
 import streamlit as st
 
-from src import services
 from src.export import flashcards_to_markdown, quiz_to_markdown, summary_to_markdown
 from src.interfaces.styles import GLOBAL_CSS
-from src.learning import GenerationError
-from src.schemas import Citation, RetrievedChunk
+from src.schemas import Citation, FlashcardSet, QuizSet, RagAnswer, RetrievedChunk, Summary
 
+_API = os.environ.get("RAG_API_URL", "http://localhost:8000")
 _ALL_DOCS = "(Tất cả tài liệu)"
 _ALL_PAGES = "(Tất cả trang)"
+
+
+def _api(method: str, path: str, **kwargs) -> httpx.Response:
+    """Synchronous API call; stops page render on connection failure."""
+    try:
+        return httpx.request(method, f"{_API}{path}", timeout=120, **kwargs)
+    except httpx.ConnectError:
+        st.error(f"Cannot connect to API at {_API}. Run `uv run rag-api` first.")
+        st.stop()
+
+
+def _filters_json(document: str | None, page: int | None) -> dict | None:
+    f: dict = {}
+    if document:
+        f["filename"] = document
+    if page is not None:
+        f["page"] = page
+    return f or None
 
 
 def _init_state() -> None:
     st.session_state.setdefault("chat_history", [])
     st.session_state.setdefault("history", [])
     st.session_state.setdefault("uploaded_files", set())
-
-
-def _build_filters(document: str | None, page: int | None) -> dict[str, str | int] | None:
-    f: dict[str, str | int] = {}
-    if document:
-        f["filename"] = document
-    if page is not None:
-        f["page"] = page
-    return f or None
 
 
 def _render_citations(citations: list[Citation]) -> None:
@@ -64,17 +79,17 @@ def _sidebar() -> tuple[str | None, int | None]:
             if f.name in st.session_state.uploaded_files:
                 continue
             with st.sidebar.status(f"Đang nạp {f.name}...", expanded=False):
-                try:
-                    info = services.save_and_ingest_pdf(f.getvalue(), f.name)
-                except ValueError as exc:
-                    st.sidebar.error(f"Lỗi: {exc}")
+                r = _api("POST", "/upload", files={"file": (f.name, f.getvalue(), "application/pdf")})
+                if r.status_code == 400:
+                    st.sidebar.error(f"Lỗi: {r.json().get('detail', 'Unknown error')}")
                     continue
+                info = r.json()
             st.session_state.uploaded_files.add(f.name)
             st.sidebar.success(f"Đã nạp {info['filename']} · {info['chunks_indexed']} đoạn")
 
     st.sidebar.subheader("Bộ lọc tài liệu")
     try:
-        docs = services.list_documents()
+        docs = _api("GET", "/documents").json()
     except Exception as exc:
         st.sidebar.error(f"Không đọc được tài liệu: {exc}")
         docs = []
@@ -111,9 +126,9 @@ def _tab_chat(document: str | None, page: int | None) -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg.get("citations"):
-                _render_citations(msg["citations"])
+                _render_citations([Citation(**c) for c in msg["citations"]])
             if msg.get("chunks"):
-                _render_chunks(msg["chunks"])
+                _render_chunks([RetrievedChunk(**c) for c in msg["chunks"]])
 
     q = st.chat_input("Đặt câu hỏi về tài liệu...")
     if not q:
@@ -124,18 +139,16 @@ def _tab_chat(document: str | None, page: int | None) -> None:
         st.markdown(q)
     with st.chat_message("assistant"):
         with st.spinner("Đang suy nghĩ..."):
-            try:
-                res = services.ask(q, filters=_build_filters(document, page))
-            except Exception as exc:
-                st.error(f"Lỗi khi trả lời: {exc}")
-                return
+            r = _api("POST", "/ask", json={"question": q, "filters": _filters_json(document, page)})
+            res = RagAnswer.model_validate(r.json())
         st.markdown(res.answer)
         _render_citations(res.citations)
         _render_chunks(res.chunks)
-    st.session_state.chat_history.append({
-        "role": "assistant", "content": res.answer,
-        "citations": res.citations, "chunks": res.chunks,
-    })
+    st.session_state.chat_history.append(
+        {"role": "assistant", "content": res.answer,
+         "citations": [c.model_dump() for c in res.citations],
+         "chunks": [c.model_dump() for c in res.chunks]}
+    )
 
 
 def _tab_summary(document: str | None, page: int | None) -> None:
@@ -147,15 +160,15 @@ def _tab_summary(document: str | None, page: int | None) -> None:
     if not submit:
         return
 
-    try:
-        with st.spinner("Đang tóm tắt..."):
-            res = services.summarize(
-                document=document, query=query or None,
-                filters=_build_filters(None, page), k=int(k),
-            )
-    except GenerationError as exc:
-        st.error(f"Không thể tóm tắt: {exc}")
+    with st.spinner("Đang tóm tắt..."):
+        r = _api("POST", "/summarize", json={
+            "document": document, "query": query or None,
+            "filters": _filters_json(None, page), "k": int(k),
+        })
+    if r.status_code == 422:
+        st.error(f"Không thể tóm tắt: {r.json().get('detail')}")
         return
+    res = Summary.model_validate(r.json())
 
     if not res.summary:
         st.warning("Không tìm thấy nội dung phù hợp để tóm tắt.")
@@ -191,18 +204,22 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
             count = c1.number_input("Số câu hỏi", 1, 30, 8)
             retrieval_k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             if st.form_submit_button("Tạo quiz", use_container_width=True, type="primary"):
-                try:
-                    with st.spinner("Đang tạo quiz..."):
-                        res = services.quiz(
-                            document=document, query=query or None,
-                            filters=_build_filters(None, page), count=int(count), k=int(retrieval_k),
-                        )
+                with st.spinner("Đang tạo quiz..."):
+                    r = _api("POST", "/quiz", json={
+                        "document": document, "query": query or None,
+                        "filters": _filters_json(None, page),
+                        "count": int(count), "k": int(retrieval_k),
+                    })
+                if r.status_code == 422:
+                    st.error(f"Không thể tạo quiz: {r.json().get('detail')}")
+                else:
+                    res = QuizSet.model_validate(r.json())
                     st.session_state.quiz_res = res
                     st.session_state.quiz_submitted = False
                     _clear_quiz_state()
-                    st.session_state.history.append({"kind": "quiz", "target": res.target, "count": len(res.items)})
-                except GenerationError as exc:
-                    st.error(f"Không thể tạo quiz: {exc}")
+                    st.session_state.history.append(
+                        {"kind": "quiz", "target": res.target, "count": len(res.items)}
+                    )
 
     if "quiz_res" not in st.session_state:
         return
@@ -219,7 +236,7 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
         col_score, col_btn = st.columns([3, 1])
         col_score.metric("Kết quả", f"{correct}/{len(res.items)} câu đúng", f"{pct}%")
         with col_btn:
-            st.write("")  # vertical alignment spacer
+            st.write("")
             if st.button("Làm lại", use_container_width=True):
                 st.session_state.quiz_submitted = False
                 _clear_quiz_state()
@@ -270,7 +287,7 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
 def _fc_card_html(face: str, side: str, topic: str | None, hint: str | None, flipped: bool) -> str:
     cls = "fc-back" if flipped else "fc-front"
     topic_html = f'<p class="fc-topic">{html.escape(topic)}</p>' if (topic and not flipped) else ""
-    hint_html = f'<p class="fc-hint">💡 {html.escape(hint)}</p>' if (hint and flipped) else ""
+    hint_html = f'<p class="fc-hint">{html.escape(hint)}</p>' if (hint and flipped) else ""
     return (
         f'<div class="fc-card {cls}">'
         f'<p class="fc-side">{side}</p>'
@@ -292,18 +309,22 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
             count = c1.number_input("Số thẻ", 1, 40, 15)
             retrieval_k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             if st.form_submit_button("Tạo thẻ", use_container_width=True, type="primary"):
-                try:
-                    with st.spinner("Đang tạo flashcards..."):
-                        res = services.flashcards(
-                            document=document, query=query or None,
-                            filters=_build_filters(None, page), count=int(count), k=int(retrieval_k),
-                        )
+                with st.spinner("Đang tạo flashcards..."):
+                    r = _api("POST", "/flashcards", json={
+                        "document": document, "query": query or None,
+                        "filters": _filters_json(None, page),
+                        "count": int(count), "k": int(retrieval_k),
+                    })
+                if r.status_code == 422:
+                    st.error(f"Không thể tạo thẻ: {r.json().get('detail')}")
+                else:
+                    res = FlashcardSet.model_validate(r.json())
                     st.session_state.fc_res = res
                     st.session_state.fc_idx = 0
                     st.session_state.fc_flipped = False
-                    st.session_state.history.append({"kind": "flashcards", "target": res.target, "count": len(res.cards)})
-                except GenerationError as exc:
-                    st.error(f"Không thể tạo thẻ: {exc}")
+                    st.session_state.history.append(
+                        {"kind": "flashcards", "target": res.target, "count": len(res.cards)}
+                    )
 
     if "fc_res" not in st.session_state:
         return
@@ -332,7 +353,7 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
 
     col_prev, col_src, col_next = st.columns(3)
     with col_prev:
-        if st.button("◀ Trước", disabled=(idx == 0), use_container_width=True):
+        if st.button("Trước", disabled=(idx == 0), use_container_width=True):
             st.session_state.fc_idx -= 1
             st.session_state.fc_flipped = False
             st.rerun()
@@ -340,7 +361,7 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
         if card.source_markers:
             st.caption("Nguồn: " + ", ".join(card.source_markers))
     with col_next:
-        if st.button("Tiếp ▶", disabled=(idx == len(cards) - 1), use_container_width=True):
+        if st.button("Tiếp", disabled=(idx == len(cards) - 1), use_container_width=True):
             st.session_state.fc_idx += 1
             st.session_state.fc_flipped = False
             st.rerun()
@@ -393,7 +414,7 @@ def run() -> None:
     st.title("Hệ thống học tập với RAG")
     st.caption("Hỏi đáp, tóm tắt, quiz, và flashcards có trích dẫn nguồn — dựa trên PDF đã nạp.")
 
-    tabs = st.tabs(["Hỏi đáp", "Tóm tắt", "Quiz", "Flashcards", "Lịch sử"])
+    tabs = st.tabs(["💬 Hỏi đáp", "📝 Tóm tắt", "📋 Quiz", "🃏 Flashcards", "📖 Lịch sử"])
     with tabs[0]:
         _tab_chat(document, page)
     with tabs[1]:

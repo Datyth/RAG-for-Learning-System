@@ -23,6 +23,7 @@ def ask(
     filters: dict[str, str | int] | None = None,
 ) -> RagAnswer:
     """Grounded Q&A over the indexed corpus."""
+    logger.info("ask | q={!r} k={} filters={}", question[:80], k, filters)
     return _answer(question, k=k, filters=filters)
 
 
@@ -33,6 +34,7 @@ def summarize(
     k: int | None = None,
 ) -> Summary:
     """Produce a grounded summary for a document, topic, or filter."""
+    logger.info("summarize | doc={} query={!r} k={}", document, query, k)
     return _summarize(document=document, query=query, filters=filters, k=k)
 
 
@@ -44,9 +46,8 @@ def quiz(
     k: int | None = None,
 ) -> QuizSet:
     """Generate a grounded multiple-choice quiz."""
-    return _generate_quiz(
-        document=document, query=query, filters=filters, count=count, k=k
-    )
+    logger.info("quiz | doc={} query={!r} count={} k={}", document, query, count, k)
+    return _generate_quiz(document=document, query=query, filters=filters, count=count, k=k)
 
 
 def flashcards(
@@ -57,9 +58,8 @@ def flashcards(
     k: int | None = None,
 ) -> FlashcardSet:
     """Generate a grounded flashcard set for spaced repetition."""
-    return _generate_flashcards(
-        document=document, query=query, filters=filters, count=count, k=k
-    )
+    logger.info("flashcards | doc={} query={!r} count={} k={}", document, query, count, k)
+    return _generate_flashcards(document=document, query=query, filters=filters, count=count, k=k)
 
 
 def list_documents() -> list[dict]:

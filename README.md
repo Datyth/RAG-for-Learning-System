@@ -16,6 +16,8 @@
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [CLI Reference](#cli-reference)
+- [HTTP API](#http-api)
+- [Streamlit UI](#streamlit-ui)
 - [LLM Providers](#llm-providers)
 - [Project Structure](#project-structure)
 
@@ -30,6 +32,8 @@
 - Vietnamese output across all LLM responses
 - JSON and Markdown export for all learning outputs
 - Two LLM backends: local HuggingFace (default) and Google Gemini
+- Interactive web UI (Streamlit) with chat, summary, quiz, and flashcard tabs
+- REST API (FastAPI) for programmatic access — Swagger UI at `/docs`
 
 
 ## Architecture
@@ -68,6 +72,10 @@ uv run rag ingest
 
 # 4. Ask a question
 uv run rag ask "What is LoRA fine-tuning?"
+
+# 5. (optional) Run the web UI or REST API
+uv run streamlit run src/interfaces/ui.py   # http://localhost:8501
+uv run rag-api                              # http://localhost:8000 — Swagger at /docs
 ```
 
 
@@ -189,6 +197,80 @@ uv run rag debug-retrieval "GPT pretraining" --k 10 --json
 </details>
 
 
+## HTTP API
+
+<details>
+<summary>FastAPI endpoints and example requests</summary>
+
+A thin FastAPI layer exposes the same core services as the CLI. All endpoints
+return JSON; retrieval results, citations, and validation errors mirror the
+CLI output.
+
+```bash
+uv run rag-api
+# or with hot-reload for development:
+uv run uvicorn src.interfaces.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs).
+
+| Method | Path           | Purpose                                                 |
+|--------|----------------|---------------------------------------------------------|
+| GET    | `/health`      | Liveness probe                                          |
+| GET    | `/documents`   | List indexed documents (filename, pages, chunk counts)  |
+| POST   | `/upload`      | Upload and ingest a single PDF (multipart/form-data)    |
+| POST   | `/ask`         | Grounded Q&A with citations                             |
+| POST   | `/summarize`   | Study-oriented summary (document / query / filter)      |
+| POST   | `/quiz`        | Multiple-choice quiz generation                         |
+| POST   | `/flashcards`  | Flashcard generation                                    |
+
+<details>
+<summary>Example request bodies</summary>
+
+```jsonc
+// POST /ask
+{ "question": "What is RLHF?", "k": 6,
+  "filters": { "filename": "paper.pdf" } }
+
+// POST /summarize
+{ "document": "paper.pdf", "query": "LoRA", "k": 12 }
+
+// POST /quiz
+{ "document": "paper.pdf", "count": 8 }
+
+// POST /flashcards
+{ "query": "PEFT methods", "count": 12 }
+```
+
+</details>
+
+</details>
+
+
+## Streamlit UI
+
+<details>
+<summary>Local web interface for study sessions</summary>
+
+A study-oriented UI. All user-facing labels are in Vietnamese.
+
+```bash
+uv run streamlit run src/interfaces/ui.py
+```
+
+Features:
+
+- Upload PDFs (auto-ingested into Qdrant)
+- Select an indexed document, optionally filter by page
+- Chat-style Q&A with source/citation panel and chunk previews
+- Card-by-card flashcard study mode with flip interaction
+- Interactive quiz with radio answers, scoring, and per-question feedback
+- Export results as JSON or Markdown
+- Session-scoped chat and learning history
+
+</details>
+
+
 ## LLM Providers
 
 | Provider | `llm_provider` | Requires |
@@ -224,15 +306,20 @@ The model name is controlled by `gemini_model` in `src/config.py`.
 
 ```
 src/
-├── cli.py          # Typer CLI — 6 commands
-├── config.py       # Frozen Settings dataclass — all runtime params
-├── export.py       # JSON / Markdown serialization
-├── indexing.py     # PDF loading, chunking, ingestion
-├── learning.py     # Summarize, quiz, flashcard generation
-├── rag.py          # Retrieval, prompting, LLM abstraction
-├── schemas.py      # Pydantic models for all outputs
-├── store.py        # Embeddings singleton + Qdrant client
-└── prompts/        # Jinja2 templates — edit to change LLM behaviour
-data/               # Input PDFs
-storage/qdrant/     # On-disk vector store (not committed)
+├── config.py           # Frozen Settings dataclass — all runtime params
+├── schemas.py          # Pydantic models for all outputs
+├── store.py            # Embeddings singleton + Qdrant client
+├── indexing.py         # PDF loading, chunking, ingestion
+├── rag.py              # Retrieval, prompting, LLM abstraction
+├── learning.py         # Summarize, quiz, flashcard generation
+├── services.py         # Service layer shared by all interfaces
+├── export.py           # JSON / Markdown serialization
+├── prompts/            # Jinja2 templates — edit to change LLM behaviour
+└── interfaces/
+    ├── api.py          # FastAPI app — thin HTTP layer
+    ├── cli.py          # Typer CLI — 6 commands
+    ├── ui.py           # Streamlit UI (Vietnamese)
+    └── styles.py       # Custom CSS for the Streamlit app
+data/                   # Input PDFs
+storage/qdrant/         # On-disk vector store (not committed)
 ```

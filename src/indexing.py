@@ -15,10 +15,13 @@ from src.schemas import ChunkMetadata
 from src.store import ensure_collection, get_vector_store
 
 
-def _splitter() -> RecursiveCharacterTextSplitter:
+def _splitter(chunk_size: int | None = None, chunk_overlap: int | None = None) -> RecursiveCharacterTextSplitter:
+    size = chunk_size or settings.chunk_size
+    overlap = chunk_overlap or settings.chunk_overlap
+
     return RecursiveCharacterTextSplitter(
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
+        chunk_size=size,
+        chunk_overlap=overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
         keep_separator=False,
     )
@@ -54,13 +57,13 @@ def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
 
 
-def build_chunks(pdf_paths: list[Path]) -> list[Document]:
+def build_chunks(pdf_paths: list[Path], chunk_size: int | None = None, chunk_overlap: int | None = None) -> list[Document]:
     page_docs: list[Document] = []
     for path in pdf_paths:
         logger.info("Loading PDF: {}", path.name)
         page_docs.extend(_load_pdf(path))
 
-    chunks = _splitter().split_documents(page_docs)
+    chunks = _splitter(chunk_size, chunk_overlap).split_documents(page_docs)
 
     per_doc_counter: dict[str, int] = defaultdict(int)
     for chunk in chunks:

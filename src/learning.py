@@ -120,6 +120,40 @@ def _batch(items: list[RetrievedChunk], size: int) -> list[list[RetrievedChunk]]
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+def _validate_items(
+    payload: object,
+    key: str,
+    model_class: type,
+    dedup_field: str,
+    label: str,
+    valid_markers: set[str],
+) -> list:
+    if not isinstance(payload, dict) or key not in payload:
+        raise GenerationError(f"Expected JSON object with '{key}' for {label}.")
+    raw_items = payload[key]
+    if not isinstance(raw_items, list):
+        raise GenerationError(f"{label.capitalize()} '{key}' must be a list.")
+    items: list = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            item = model_class.model_validate(raw)
+        except ValidationError as e:
+            logger.warning("Dropping invalid {}: {}", label, e)
+            continue
+        norm = getattr(item, dedup_field).strip().lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        item.source_markers = [m for m in item.source_markers if m in valid_markers]
+        items.append(item)
+    if not items:
+        raise GenerationError(f"No valid {label} produced.")
+    return items
+
+
 def _validate_summary_payload(payload: object) -> tuple[str, list[str]]:
     if not isinstance(payload, dict):
         raise GenerationError("Expected a JSON object for summary.")
@@ -179,33 +213,7 @@ def summarize(
 
 
 def _validate_quiz_items(payload: object, valid_markers: set[str]) -> list[QuizItem]:
-    if not isinstance(payload, dict) or "items" not in payload:
-        raise GenerationError("Expected JSON object with 'items' for quiz.")
-    raw_items = payload["items"]
-    if not isinstance(raw_items, list):
-        raise GenerationError("Quiz 'items' must be a list.")
-
-    items: list[QuizItem] = []
-    seen_questions: set[str] = set()
-    for raw in raw_items:
-        if not isinstance(raw, dict):
-            continue
-        try:
-            item = QuizItem.model_validate(raw)
-        except ValidationError as e:
-            logger.warning("Dropping invalid quiz item: {}", e)
-            continue
-
-        norm_q = item.question.strip().lower()
-        if norm_q in seen_questions:
-            continue
-        seen_questions.add(norm_q)
-
-        item.source_markers = [m for m in item.source_markers if m in valid_markers]
-        items.append(item)
-    if not items:
-        raise GenerationError("No valid quiz items produced.")
-    return items
+    return _validate_items(payload, "items", QuizItem, "question", "quiz items", valid_markers)
 
 
 def generate_quiz(
@@ -242,34 +250,7 @@ def generate_quiz(
 
 
 def _validate_flashcards(payload: object, valid_markers: set[str]) -> list[Flashcard]:
-    if not isinstance(payload, dict) or "cards" not in payload:
-        raise GenerationError("Expected JSON object with 'cards' for flashcards.")
-    raw_cards = payload["cards"]
-    if not isinstance(raw_cards, list):
-        raise GenerationError("Flashcards 'cards' must be a list.")
-
-    cards: list[Flashcard] = []
-    seen_fronts: set[str] = set()
-    for raw in raw_cards:
-        if not isinstance(raw, dict):
-            continue
-        try:
-            card = Flashcard.model_validate(raw)
-        except ValidationError as e:
-            logger.warning("Dropping invalid flashcard: {}", e)
-            continue
-
-        norm_front = card.front.strip().lower()
-        if norm_front in seen_fronts:
-            continue
-        seen_fronts.add(norm_front)
-
-        card.source_markers = [m for m in card.source_markers if m in valid_markers]
-        cards.append(card)
-
-    if not cards:
-        raise GenerationError("No valid flashcards produced.")
-    return cards
+    return _validate_items(payload, "cards", Flashcard, "front", "flashcards", valid_markers)
 
 
 def generate_flashcards(

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import typer
 from loguru import logger
+from pydantic import BaseModel
 
+from src import services
 from src.export import (
     model_to_text,
     to_json,
@@ -13,14 +15,8 @@ from src.export import (
     write_markdown,
     write_text,
 )
-from src.indexing import ingest as run_ingest
-from src.learning import (
-    GenerationError,
-    generate_flashcards,
-    generate_quiz,
-    summarize,
-)
-from src.rag import answer as run_answer, retrieve
+from src.learning import GenerationError
+from src.rag import retrieve
 from src.schemas import RetrievedChunk
 from src.store import close_client
 
@@ -79,7 +75,7 @@ def _validate_format(fmt: str) -> str:
     return fmt
 
 
-def _emit(model, output: Path | None, fmt: str) -> None:
+def _emit(model: BaseModel, output: Path | None, fmt: str) -> None:
     if output:
         if fmt == "json":
             written = write_json(model, output)
@@ -97,7 +93,7 @@ def ingest(
     recreate: bool = typer.Option(False, "--recreate", help="Drop and recreate the collection."),
 ) -> None:
     """Ingest every PDF under ./data into Qdrant."""
-    run_ingest(recreate=recreate)
+    services.ingest_data_dir(recreate=recreate)
 
 
 @app.command()
@@ -112,7 +108,7 @@ def ask(
     ),
 ) -> None:
     """Answer a question using retrieved context only."""
-    result = run_answer(question, k=k, filters=_parse_filters(filters))
+    result = services.ask(question, k=k, filters=_parse_filters(filters))
     _print_answer(result.answer)
     _print_sources(result.chunks)
 
@@ -152,7 +148,7 @@ def debug_retrieval(
 
 
 @app.command("summarize")
-def summarize_cmd(
+def summarize(
     document: str | None = typer.Option(
         None, "--document", "-d", help="Target filename (e.g. paper.pdf)."
     ),
@@ -173,7 +169,7 @@ def summarize_cmd(
     """Generate a grounded study summary of a document, filter, or topic."""
     fmt = _validate_format(fmt)
     try:
-        result = summarize(
+        result = services.summarize(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -187,7 +183,7 @@ def summarize_cmd(
 
 
 @app.command("quiz")
-def quiz_cmd(
+def quiz(
     document: str | None = typer.Option(None, "--document", "-d", help="Target filename."),
     query: str | None = typer.Option(
         None, "--query", "-q", help="Topic or question for retrieval-guided quiz."
@@ -201,7 +197,7 @@ def quiz_cmd(
     """Generate a grounded multiple-choice quiz set."""
     fmt = _validate_format(fmt)
     try:
-        result = generate_quiz(
+        result = services.quiz(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -216,7 +212,7 @@ def quiz_cmd(
 
 
 @app.command("flashcards")
-def flashcards_cmd(
+def flashcards(
     document: str | None = typer.Option(None, "--document", "-d", help="Target filename."),
     query: str | None = typer.Option(
         None, "--query", "-q", help="Topic or question for retrieval-guided flashcards."
@@ -230,7 +226,7 @@ def flashcards_cmd(
     """Generate a grounded flashcard set for study and review."""
     fmt = _validate_format(fmt)
     try:
-        result = generate_flashcards(
+        result = services.flashcards(
             document=document,
             query=query,
             filters=_parse_filters(filters),

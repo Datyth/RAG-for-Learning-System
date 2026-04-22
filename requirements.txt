@@ -16,3 +16,5 @@ sentence-transformers>=5.4,<6
 torch>=2.4,<3
 transformers>=4.46,<6
 typer>=0.24,<0.25
+
+ragas

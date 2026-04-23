@@ -18,3 +18,5 @@ transformers>=4.46,<6
 typer>=0.24,<0.25
 
 ragas
+pandas
+vllm

@@ -182,7 +182,7 @@ def summarize(
     )
 
     if not chunks:
-        return Summary(scope=scope, target=target, summary="")
+        raise GenerationError("No chunks available for summarization.")
 
     batch_size = settings.summarize_batch_size
     if len(chunks) <= batch_size:

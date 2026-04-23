@@ -79,7 +79,9 @@ def _sidebar() -> tuple[str | None, int | None]:
             if f.name in st.session_state.uploaded_files:
                 continue
             with st.sidebar.status(f"Đang nạp {f.name}...", expanded=False):
-                r = _api("POST", "/upload", files={"file": (f.name, f.getvalue(), "application/pdf")})
+                r = _api(
+                    "POST", "/upload", files={"file": (f.name, f.getvalue(), "application/pdf")}
+                )
                 if r.status_code == 400:
                     st.sidebar.error(f"Lỗi: {r.json().get('detail', 'Unknown error')}")
                     continue
@@ -145,9 +147,12 @@ def _tab_chat(document: str | None, page: int | None) -> None:
         _render_citations(res.citations)
         _render_chunks(res.chunks)
     st.session_state.chat_history.append(
-        {"role": "assistant", "content": res.answer,
-         "citations": [c.model_dump() for c in res.citations],
-         "chunks": [c.model_dump() for c in res.chunks]}
+        {
+            "role": "assistant",
+            "content": res.answer,
+            "citations": [c.model_dump() for c in res.citations],
+            "chunks": [c.model_dump() for c in res.chunks],
+        }
     )
 
 
@@ -161,10 +166,16 @@ def _tab_summary(document: str | None, page: int | None) -> None:
         return
 
     with st.spinner("Đang tóm tắt..."):
-        r = _api("POST", "/summarize", json={
-            "document": document, "query": query or None,
-            "filters": _filters_json(None, page), "k": int(k),
-        })
+        r = _api(
+            "POST",
+            "/summarize",
+            json={
+                "document": document,
+                "query": query or None,
+                "filters": _filters_json(None, page),
+                "k": int(k),
+            },
+        )
     if r.status_code == 422:
         st.error(f"Không thể tóm tắt: {r.json().get('detail')}")
         return
@@ -182,8 +193,12 @@ def _tab_summary(document: str | None, page: int | None) -> None:
     _render_citations(res.citations)
     st.divider()
     col_a, col_b = st.columns(2)
-    col_a.download_button("Tải JSON", res.model_dump_json(indent=2), file_name="summary.json", mime="application/json")
-    col_b.download_button("Tải Markdown", summary_to_markdown(res), file_name="summary.md", mime="text/markdown")
+    col_a.download_button(
+        "Tải JSON", res.model_dump_json(indent=2), file_name="summary.json", mime="application/json"
+    )
+    col_b.download_button(
+        "Tải Markdown", summary_to_markdown(res), file_name="summary.md", mime="text/markdown"
+    )
     st.session_state.history.append({"kind": "summary", "target": res.target})
 
 
@@ -205,11 +220,17 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
             retrieval_k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             if st.form_submit_button("Tạo quiz", use_container_width=True, type="primary"):
                 with st.spinner("Đang tạo quiz..."):
-                    r = _api("POST", "/quiz", json={
-                        "document": document, "query": query or None,
-                        "filters": _filters_json(None, page),
-                        "count": int(count), "k": int(retrieval_k),
-                    })
+                    r = _api(
+                        "POST",
+                        "/quiz",
+                        json={
+                            "document": document,
+                            "query": query or None,
+                            "filters": _filters_json(None, page),
+                            "count": int(count),
+                            "k": int(retrieval_k),
+                        },
+                    )
                 if r.status_code == 422:
                     st.error(f"Không thể tạo quiz: {r.json().get('detail')}")
                 else:
@@ -229,7 +250,8 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
 
     if submitted:
         correct = sum(
-            1 for i, item in enumerate(res.items)
+            1
+            for i, item in enumerate(res.items)
             if st.session_state.get(f"quiz_ans_{i}") == item.correct_index
         )
         pct = int(100 * correct / len(res.items))
@@ -250,13 +272,19 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
             st.markdown(f"**Câu {i + 1}.**{suffix}")
             st.markdown(item.question)
             st.radio(
-                f"q{i}", item.options, key=f"quiz_q_{i}",
+                f"q{i}",
+                item.options,
+                key=f"quiz_q_{i}",
                 format_func=lambda opt, m=letter_map: m[opt],
-                label_visibility="collapsed", index=None, disabled=submitted,
+                label_visibility="collapsed",
+                index=None,
+                disabled=submitted,
             )
             if submitted:
                 ans = st.session_state.get(f"quiz_ans_{i}")
-                correct_label = f"**{chr(65 + item.correct_index)}. {item.options[item.correct_index]}**"
+                correct_label = (
+                    f"**{chr(65 + item.correct_index)}. {item.options[item.correct_index]}**"
+                )
                 if ans == item.correct_index:
                     st.success(f"Đúng! Đáp án: {correct_label}")
                 elif ans is not None:
@@ -273,15 +301,21 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
         if st.button("Nộp bài", type="primary"):
             for i, item in enumerate(res.items):
                 val = st.session_state.get(f"quiz_q_{i}")
-                st.session_state[f"quiz_ans_{i}"] = item.options.index(val) if val is not None else None
+                st.session_state[f"quiz_ans_{i}"] = (
+                    item.options.index(val) if val is not None else None
+                )
             st.session_state.quiz_submitted = True
             st.rerun()
 
     _render_citations(res.citations)
     st.divider()
     col_a, col_b = st.columns(2)
-    col_a.download_button("Tải JSON", res.model_dump_json(indent=2), file_name="quiz.json", mime="application/json")
-    col_b.download_button("Tải Markdown", quiz_to_markdown(res), file_name="quiz.md", mime="text/markdown")
+    col_a.download_button(
+        "Tải JSON", res.model_dump_json(indent=2), file_name="quiz.json", mime="application/json"
+    )
+    col_b.download_button(
+        "Tải Markdown", quiz_to_markdown(res), file_name="quiz.md", mime="text/markdown"
+    )
 
 
 def _fc_card_html(face: str, side: str, topic: str | None, hint: str | None, flipped: bool) -> str:
@@ -291,10 +325,10 @@ def _fc_card_html(face: str, side: str, topic: str | None, hint: str | None, fli
     return (
         f'<div class="fc-card {cls}">'
         f'<p class="fc-side">{side}</p>'
-        f'{topic_html}'
+        f"{topic_html}"
         f'<p class="fc-text">{html.escape(face).replace(chr(10), "<br>")}</p>'
-        f'{hint_html}'
-        f'</div>'
+        f"{hint_html}"
+        f"</div>"
     )
 
 
@@ -310,11 +344,17 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
             retrieval_k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             if st.form_submit_button("Tạo thẻ", use_container_width=True, type="primary"):
                 with st.spinner("Đang tạo flashcards..."):
-                    r = _api("POST", "/flashcards", json={
-                        "document": document, "query": query or None,
-                        "filters": _filters_json(None, page),
-                        "count": int(count), "k": int(retrieval_k),
-                    })
+                    r = _api(
+                        "POST",
+                        "/flashcards",
+                        json={
+                            "document": document,
+                            "query": query or None,
+                            "filters": _filters_json(None, page),
+                            "count": int(count),
+                            "k": int(retrieval_k),
+                        },
+                    )
                 if r.status_code == 422:
                     st.error(f"Không thể tạo thẻ: {r.json().get('detail')}")
                 else:
@@ -340,14 +380,18 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
         _fc_card_html(
             card.back if flipped else card.front,
             "Mặt sau" if flipped else "Mặt trước",
-            card.topic, card.hint, flipped,
+            card.topic,
+            card.hint,
+            flipped,
         ),
         unsafe_allow_html=True,
     )
 
     _, col_flip, _ = st.columns([1, 2, 1])
     with col_flip:
-        if st.button("Lật lại" if flipped else "Xem đáp án", use_container_width=True, type="primary"):
+        if st.button(
+            "Lật lại" if flipped else "Xem đáp án", use_container_width=True, type="primary"
+        ):
             st.session_state.fc_flipped = not flipped
             st.rerun()
 
@@ -369,8 +413,15 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
     _render_citations(res.citations)
     st.divider()
     col_a, col_b = st.columns(2)
-    col_a.download_button("Tải JSON", res.model_dump_json(indent=2), file_name="flashcards.json", mime="application/json")
-    col_b.download_button("Tải Markdown", flashcards_to_markdown(res), file_name="flashcards.md", mime="text/markdown")
+    col_a.download_button(
+        "Tải JSON",
+        res.model_dump_json(indent=2),
+        file_name="flashcards.json",
+        mime="application/json",
+    )
+    col_b.download_button(
+        "Tải Markdown", flashcards_to_markdown(res), file_name="flashcards.md", mime="text/markdown"
+    )
 
 
 def _tab_history() -> None:

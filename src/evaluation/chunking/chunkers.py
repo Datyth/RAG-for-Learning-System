@@ -2,23 +2,20 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from typing import List, Optional
 
+
 class RecursiveChunker:
     def __init__(
-        self, 
-        chunk_size: int = 500, 
-        chunk_overlap: int = 50, 
-        separators: Optional[List[str]] = None
+        self, chunk_size: int = 500, chunk_overlap: int = 50, separators: Optional[List[str]] = None
     ):
-
         self.separators = separators or ["\n\n", "\n", ". ", " ", ""]
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        
+
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             separators=self.separators,
-            is_separator_regex=False
+            is_separator_regex=False,
         )
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
@@ -36,10 +33,10 @@ class RecursiveChunker:
 
 class SemanticChunker(RecursiveChunker):
     def __init__(
-        self, 
-        chunk_size: int = 500, 
-        chunk_overlap: int = 50, 
+        self,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
         separators: Optional[List[str]] = None,
-        embedding = None
+        embedding=None,
     ):
         super().__init__(chunk_size, chunk_overlap, separators)

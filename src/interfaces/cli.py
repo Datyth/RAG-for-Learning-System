@@ -162,9 +162,7 @@ def summarize(
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write output to this file path."
     ),
-    fmt: str = typer.Option(
-        "text", "--format", help="Output format: text | json | md."
-    ),
+    fmt: str = typer.Option("text", "--format", help="Output format: text | json | md."),
 ) -> None:
     """Generate a grounded study summary of a document, filter, or topic."""
     fmt = _validate_format(fmt)

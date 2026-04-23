@@ -35,10 +35,6 @@ def close_client() -> None:
     get_client.cache_clear()
 
 
-def embedding_dim() -> int:
-    return len(get_embeddings().embed_query("dimension probe"))
-
-
 @lru_cache(maxsize=1)
 def get_client() -> QdrantClient:
     """Return a cached local Qdrant client backed by on-disk storage."""
@@ -50,7 +46,6 @@ def ensure_collection(recreate: bool = False) -> None:
     """Create the collection and payload indexes if they do not exist."""
     client = get_client()
     name = settings.qdrant_collection
-    dim = embedding_dim()
 
     exists = client.collection_exists(name)
     if exists and recreate:
@@ -58,6 +53,7 @@ def ensure_collection(recreate: bool = False) -> None:
         exists = False
 
     if not exists:
+        dim = len(get_embeddings().embed_query("dimension probe"))
         client.create_collection(
             collection_name=name,
             vectors_config=qmodels.VectorParams(

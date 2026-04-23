@@ -103,11 +103,16 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=RagAnswer)
 def ask(req: AskRequest) -> RagAnswer:
     """Grounded Q&A with inline source citations."""
-    return services.ask(
-        req.question,
-        k=req.k,
-        filters=_filters_to_dict(req.filters),
-    )
+    try:
+        return services.ask(
+            req.question,
+            k=req.k,
+            filters=_filters_to_dict(req.filters),
+        )
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/summarize", response_model=Summary)

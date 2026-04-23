@@ -1,12 +1,11 @@
 """Thin service layer reusable by CLI, API, and UI."""
 
-import uuid
 from pathlib import Path
 
 from loguru import logger
 
 from src.config import settings
-from src.indexing import build_chunks, ingest as _run_ingest
+from src.indexing import build_chunks, index_chunks, ingest as _run_ingest
 from src.learning import (
     generate_flashcards as _generate_flashcards,
     generate_quiz as _generate_quiz,
@@ -14,7 +13,7 @@ from src.learning import (
 )
 from src.rag import answer as _answer, fetch_all_chunks
 from src.schemas import FlashcardSet, QuizSet, RagAnswer, Summary
-from src.store import ensure_collection, get_vector_store
+from src.store import ensure_collection
 
 
 def ask(
@@ -63,7 +62,11 @@ def flashcards(
 
 
 def list_documents() -> list[dict]:
-    """Return indexed documents with filename, document_id, pages, chunk counts."""
+    """Return indexed documents with filename, document_id, pages, chunk counts.
+
+    WARNING: scrolls every chunk in the collection -- O(collection_size).
+    Consider Qdrant aggregation or a separate metadata store for large corpora.
+    """
     chunks = fetch_all_chunks(filters=None)
     by_doc: dict[str, dict] = {}
     for c in chunks:
@@ -120,13 +123,9 @@ def save_and_ingest_pdf(file_bytes: bytes, filename: str) -> dict:
         logger.warning("No chunks produced for uploaded file {}", safe_name)
         return {"filename": safe_name, "chunks_indexed": 0}
 
-    ids = [
-        str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks
-    ]
-    store = get_vector_store()
-    store.add_documents(chunks, ids=ids)
-    logger.info("Indexed {} chunks from {}", len(chunks), safe_name)
-    return {"filename": safe_name, "chunks_indexed": len(chunks)}
+    count = index_chunks(chunks)
+    logger.info("Indexed {} chunks from {}", count, safe_name)
+    return {"filename": safe_name, "chunks_indexed": count}
 
 
 def ingest_data_dir(recreate: bool = False) -> int:

@@ -15,7 +15,9 @@ from src.schemas import ChunkMetadata
 from src.store import ensure_collection, get_vector_store
 
 
-def _splitter(chunk_size: int | None = None, chunk_overlap: int | None = None) -> RecursiveCharacterTextSplitter:
+def _splitter(
+    chunk_size: int | None = None, chunk_overlap: int | None = None
+) -> RecursiveCharacterTextSplitter:
     size = chunk_size or settings.chunk_size
     overlap = chunk_overlap or settings.chunk_overlap
 
@@ -57,7 +59,9 @@ def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
 
 
-def build_chunks(pdf_paths: list[Path], chunk_size: int | None = None, chunk_overlap: int | None = None) -> list[Document]:
+def build_chunks(
+    pdf_paths: list[Path], chunk_size: int | None = None, chunk_overlap: int | None = None
+) -> list[Document]:
     page_docs: list[Document] = []
     for path in pdf_paths:
         logger.info("Loading PDF: {}", path.name)
@@ -82,6 +86,18 @@ def build_chunks(pdf_paths: list[Path], chunk_size: int | None = None, chunk_ove
     return chunks
 
 
+def index_chunks(chunks: list[Document]) -> int:
+    """Compute deterministic UUIDs and add chunks to the vector store.
+
+    Re-ingesting the same content upserts instead of creating duplicates.
+    """
+    if not chunks:
+        return 0
+    ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks]
+    get_vector_store().add_documents(chunks, ids=ids)
+    return len(chunks)
+
+
 def ingest(recreate: bool = False) -> int:
     pdfs = discover_pdfs()
     if not pdfs:
@@ -95,10 +111,6 @@ def ingest(recreate: bool = False) -> int:
         logger.warning("No chunks produced from {} PDF(s)", len(pdfs))
         return 0
 
-    # Deterministic UUIDs from chunk_id ensure upsert semantics: re-ingesting the same
-    # file without --recreate overwrites existing points instead of creating duplicates.
-    ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks]
-    store = get_vector_store()
-    store.add_documents(chunks, ids=ids)
-    logger.info("Ingested {} chunks from {} PDF(s)", len(chunks), len(pdfs))
-    return len(chunks)
+    count = index_chunks(chunks)
+    logger.info("Ingested {} chunks from {} PDF(s)", count, len(pdfs))
+    return count

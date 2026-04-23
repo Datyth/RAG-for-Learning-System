@@ -30,7 +30,7 @@
 - Metadata filtering by filename, page, section, or any indexed field
 - Vietnamese output across all LLM responses
 - JSON and Markdown export for all learning outputs
-- Two LLM backends: local HuggingFace (default) and Google Gemini
+- Three LLM backends: vLLM (default), local HuggingFace, and Google Gemini
 - Interactive web UI (Streamlit) — calls FastAPI backend via HTTP
 - REST API (FastAPI) for programmatic access — Swagger UI at `/docs`
 
@@ -90,11 +90,14 @@ flowchart TD
 
 ## Quick Start
 
+<details open>
+<summary><b>Install with uv (recommended)</b></summary>
+
 ```bash
 # 1. Install dependencies
 uv sync
 
-# 2. Configure secrets (Gemini only — skip if using local HF)
+# 2. Configure secrets (Gemini only — skip if using local HF/vLLM)
 cp .env.example .env
 
 # 3. Place PDFs in ./data/, then ingest
@@ -108,6 +111,34 @@ uv run rag-api &
 uv run streamlit run src/interfaces/ui.py   # http://localhost:8501
 ```
 
+</details>
+
+<details>
+<summary><b>Install with pip</b></summary>
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+
+python -m pip install -U pip
+python -m pip install -r requirements.txt
+
+# Configure secrets (Gemini only)
+cp .env.example .env
+
+# Ingest PDFs from ./data/
+python -m src.interfaces.cli ingest
+
+# Ask a question
+python -m src.interfaces.cli ask "What is LoRA fine-tuning?"
+
+# API + UI
+python -m src.interfaces.api &
+streamlit run src/interfaces/ui.py          # http://localhost:8501
+```
+
+</details>
+
 
 ## Configuration
 
@@ -118,7 +149,7 @@ All runtime parameters live in `src/config.py`. The `.env` file is for secrets o
 
 | Setting | Default | Description |
 |---|---|---|
-| `llm_provider` | `hf_local` | `"hf_local"` or `"gemini"` |
+| `llm_provider` | `vllm` | `"hf_local"` / `"gemini"` / `"vllm"` |
 | `hf_model` | Qwen3-4B-Instruct | Local path or HuggingFace model ID |
 | `hf_device` | `1` | `-1` = CPU, `0+` = CUDA device index |
 | `hf_max_new_tokens` | `2048` | Max tokens to generate |
@@ -301,8 +332,25 @@ Features:
 
 | Provider | `llm_provider` | Requires |
 |---|---|---|
-| Local HuggingFace | `hf_local` (default) | — |
+| vLLM (OpenAI-compatible) | `vllm` (default) | vLLM server running on `vllm_api_base` |
+| Local HuggingFace | `hf_local` | — |
 | Google Gemini | `gemini` | `GOOGLE_API_KEY` in `.env` |
+
+<details>
+<summary>vLLM setup (default)</summary>
+
+1. Start the vLLM OpenAI-compatible server (port 8001 to avoid conflict with FastAPI on 8000):
+
+```bash
+CUDA_VISIBLE_DEVICES=1 uv run python -m vllm.entrypoints.openai.api_server \
+    --model /mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507 \
+    --port 8001 --dtype bfloat16 --gpu-memory-utilization 0.8 \
+    --max-model-len 32768 --trust-remote-code
+```
+
+2. Ensure `llm_provider = "vllm"` and `vllm_api_base` points to the server in `src/config.py`.
+
+</details>
 
 <details>
 <summary>Local HuggingFace setup</summary>
@@ -327,7 +375,6 @@ The model name is controlled by `gemini_model` in `src/config.py`.
 
 </details>
 
-
 ## Project Structure
 
 ```
@@ -341,6 +388,7 @@ src/
 ├── services.py         # Service layer shared by all interfaces
 ├── export.py           # JSON / Markdown serialization
 ├── prompts/            # Jinja2 templates — edit to change LLM behaviour
+├── evaluation/         # Offline Ragas evaluation (evaluator, metrics)
 └── interfaces/
     ├── api.py          # FastAPI app — thin HTTP layer
     ├── cli.py          # Typer CLI — 6 commands

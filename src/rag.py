@@ -12,6 +12,9 @@ from src.config import settings
 from src.schemas import ChunkMetadata, Citation, RagAnswer, RetrievedChunk
 from src.store import get_client, get_vector_store
 
+from langchain_community.chat_models import ChatOllama
+from langchain_openai import ChatOpenAI
+
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 ANSWER_TEMPLATE = "answer.jinja2"
 SCROLL_PAGE_SIZE = 256
@@ -184,8 +187,12 @@ def _llm() -> BaseChatModel:
         return _build_hf_local()
     if provider == "gemini":
         return _build_gemini()
+    if provider == "ollama":
+        return _build_ollama()
+    if provider == "vllm":
+        return _build_vllm()
     raise ValueError(
-        f"Unknown llm_provider '{provider}'. Expected 'hf_local' or 'gemini'."
+        f"Unknown llm_provider '{provider}'. Expected 'hf_local' or 'gemini' or 'ollama' or 'vllm'."
     )
 
 
@@ -215,3 +222,19 @@ def answer(
         citations=format_citations(chunks),
         chunks=chunks,
     )
+
+
+def _build_ollama() -> BaseChatModel:
+    return ChatOllama(
+        model=settings.hf_model, 
+        temperature=settings.llm_temperature,
+        base_url="http://localhost:11434" 
+    )
+
+def _build_vllm() -> BaseChatModel:
+    return ChatOpenAI(
+        model="/mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507",
+        openai_api_key="EMPTY",
+        openai_api_base="http://localhost:8000/v1",
+        temperature=settings.llm_temperature,
+)

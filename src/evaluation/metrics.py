@@ -1,10 +1,13 @@
+import ragas
 from ragas.metrics import (faithfulness, answer_relevancy, context_precision, context_recall)
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
 
 from src.config import settings
-from src.rag import _llm  
+from src.rag import _llm
 from src.store import get_embeddings
+
+
 
 
 def get_ragas_metrics() -> list[ragas.metrics.Metric]:

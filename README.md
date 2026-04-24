@@ -30,7 +30,7 @@
 - Metadata filtering by filename, page, section, or any indexed field
 - Vietnamese output across all LLM responses
 - JSON and Markdown export for all learning outputs
-- Three LLM backends: vLLM (default), local HuggingFace, and Google Gemini
+- Three LLM backends: local HuggingFace (default), vLLM, and Google Gemini
 - Interactive web UI (Streamlit) — calls FastAPI backend via HTTP
 - REST API (FastAPI) for programmatic access — Swagger UI at `/docs`
 
@@ -149,7 +149,7 @@ All runtime parameters live in `src/config.py`. The `.env` file is for secrets o
 
 | Setting | Default | Description |
 |---|---|---|
-| `llm_provider` | `vllm` | `"hf_local"` / `"gemini"` / `"vllm"` |
+| `llm_provider` | `hf_local` | `"hf_local"` / `"gemini"` / `"vllm"` |
 | `hf_model` | Qwen3-4B-Instruct | Local path or HuggingFace model ID |
 | `hf_device` | `1` | `-1` = CPU, `0+` = CUDA device index |
 | `hf_max_new_tokens` | `2048` | Max tokens to generate |
@@ -332,12 +332,12 @@ Features:
 
 | Provider | `llm_provider` | Requires |
 |---|---|---|
-| vLLM (OpenAI-compatible) | `vllm` (default) | vLLM server running on `vllm_api_base` |
-| Local HuggingFace | `hf_local` | — |
+| Local HuggingFace | `hf_local` (default) | — |
+| vLLM (OpenAI-compatible) | `vllm` | vLLM server running on `vllm_api_base` |
 | Google Gemini | `gemini` | `GOOGLE_API_KEY` in `.env` |
 
 <details>
-<summary>vLLM setup (default)</summary>
+<summary>vLLM setup</summary>
 
 1. Start the vLLM OpenAI-compatible server (port 8001 to avoid conflict with FastAPI on 8000):
 
@@ -348,7 +348,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m vllm.entrypoints.openai.api_server \
     --max-model-len 32768 --trust-remote-code
 ```
 
-2. Ensure `llm_provider = "vllm"` and `vllm_api_base` points to the server in `src/config.py`.
+2. For evaluation or benchmarking, set `llm_provider = "vllm"` (or pass an override in evaluation scripts) and ensure `vllm_api_base` points to the server in `src/config.py`.
 
 </details>
 

@@ -95,7 +95,7 @@ def _evaluate_strategy(strategy: ChunkingStrategy, output_dir: Path) -> dict[str
         def answer_fn(q: str):
             return answer(q, collection_name=collection_name)
 
-        result = run_evaluation(test_cases, answer_fn=answer_fn)
+        result = run_evaluation(test_cases, answer_fn=answer_fn, llm_provider="vllm")
         strategy_out["ragas_result"] = _safe_serialize_result(result)
     except Exception as exc:  # pragma: no cover
         strategy_out["error"] = str(exc)
@@ -133,4 +133,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

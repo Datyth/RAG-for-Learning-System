@@ -147,8 +147,8 @@ def _validate_items(
         if norm in seen:
             continue
         seen.add(norm)
-        item.source_markers = [m for m in item.source_markers if m in valid_markers]
-        items.append(item)
+        filtered_markers = [m for m in item.source_markers if m in valid_markers]
+        items.append(item.model_copy(update={"source_markers": filtered_markers}))
     if not items:
         raise GenerationError(f"No valid {label} produced.")
     return items

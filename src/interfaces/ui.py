@@ -26,11 +26,10 @@ _ALL_PAGES = "(Tất cả trang)"
 
 
 def _api(method: str, path: str, **kwargs) -> httpx.Response:
-    """Synchronous API call; stops page render on connection failure."""
     try:
         return httpx.request(method, f"{_API}{path}", timeout=120, **kwargs)
     except httpx.ConnectError:
-        st.error(f"Cannot connect to API at {_API}. Run `uv run rag-api` first.")
+        st.error(f"Không kết nối được API tại {_API}. Chạy `uv run rag-api` trước.")
         st.stop()
 
 
@@ -52,10 +51,16 @@ def _init_state() -> None:
 def _render_citations(citations: list[Citation]) -> None:
     if not citations:
         return
+    chips = "".join(
+        f'<span class="src-chip">'
+        f'<b>{html.escape(c.source_marker)}</b>'
+        f'<span class="src-chip-meta">{html.escape(c.filename)} tr.{c.page}'
+        f'{" · " + html.escape(c.section) if c.section else ""}</span>'
+        f"</span>"
+        for c in citations
+    )
     with st.expander("Nguồn trích dẫn", expanded=False):
-        for c in citations:
-            section = f" — {c.section}" if c.section else ""
-            st.markdown(f"- **[{c.source_marker}]** `{c.filename}` (trang {c.page}){section}")
+        st.markdown(f'<div class="src-chips">{chips}</div>', unsafe_allow_html=True)
 
 
 def _render_chunks(chunks: list[RetrievedChunk]) -> None:
@@ -69,7 +74,12 @@ def _render_chunks(chunks: list[RetrievedChunk]) -> None:
 
 
 def _sidebar() -> tuple[str | None, int | None]:
-    st.sidebar.title("📚 RAG Learning")
+    st.sidebar.markdown(
+        "<h2 style='margin:0 0 .1rem;font-size:1.3rem'>📚 RAG Learning</h2>"
+        "<p style='margin:0 0 1rem;opacity:.55;font-size:.82rem'>Học tập thông minh với AI</p>",
+        unsafe_allow_html=True,
+    )
+
     st.sidebar.subheader("Tải tài liệu PDF")
     uploaded = st.sidebar.file_uploader(
         "Chọn một hoặc nhiều PDF", type=["pdf"], accept_multiple_files=True, key="uploader"
@@ -87,8 +97,9 @@ def _sidebar() -> tuple[str | None, int | None]:
                     continue
                 info = r.json()
             st.session_state.uploaded_files.add(f.name)
-            st.sidebar.success(f"Đã nạp {info['filename']} · {info['chunks_indexed']} đoạn")
+            st.sidebar.success(f"Đã nạp **{info['filename']}** · {info['chunks_indexed']} đoạn")
 
+    st.sidebar.divider()
     st.sidebar.subheader("Bộ lọc tài liệu")
     try:
         docs = _api("GET", "/documents").json()
@@ -110,12 +121,20 @@ def _sidebar() -> tuple[str | None, int | None]:
         if chosen != _ALL_PAGES:
             page = int(chosen)
     else:
-        st.sidebar.caption("Chọn một tài liệu để lọc theo trang.")
+        st.sidebar.caption("Chọn tài liệu để lọc theo trang.")
 
     if docs:
-        with st.sidebar.expander(f"Đang có {len(docs)} tài liệu trong kho"):
+        total_chunks = sum(d["chunk_count"] for d in docs)
+        c1, c2 = st.sidebar.columns(2)
+        c1.metric("Tài liệu", len(docs))
+        c2.metric("Đoạn văn", total_chunks)
+        with st.sidebar.expander("Xem chi tiết kho"):
             for d in docs:
-                st.write(f"- `{d['filename']}` · {d['page_count']} trang · {d['chunk_count']} đoạn")
+                st.markdown(
+                    f"**{d['filename']}**  \n"
+                    f"<span style='font-size:.8rem;opacity:.6'>{d['page_count']} trang · {d['chunk_count']} đoạn</span>",
+                    unsafe_allow_html=True,
+                )
 
     return None if selected == _ALL_DOCS else selected, page
 
@@ -185,11 +204,16 @@ def _tab_summary(document: str | None, page: int | None) -> None:
         st.warning("Không tìm thấy nội dung phù hợp để tóm tắt.")
         return
 
+    scope_label = {"query": "Theo chủ đề", "document": "Theo tài liệu", "filter": "Theo bộ lọc", "corpus": "Toàn bộ kho"}.get(res.scope, res.scope)
+    st.caption(f"Phạm vi: {scope_label}" + (f" · {res.target}" if res.target else ""))
     st.markdown(res.summary)
     if res.key_points:
-        st.markdown("**Các ý chính:**")
-        for kp in res.key_points:
-            st.markdown(f"- {kp}")
+        items_html = "".join(f"<li>{html.escape(kp)}</li>" for kp in res.key_points)
+        st.markdown(
+            f"<p style='font-weight:600;margin:.75rem 0 .25rem'>Các ý chính</p>"
+            f'<ul class="kp-list">{items_html}</ul>',
+            unsafe_allow_html=True,
+        )
     _render_citations(res.citations)
     st.divider()
     col_a, col_b = st.columns(2)
@@ -255,8 +279,17 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
             if st.session_state.get(f"quiz_ans_{i}") == item.correct_index
         )
         pct = int(100 * correct / len(res.items))
+        cls = "score-high" if pct >= 70 else ("score-mid" if pct >= 40 else "score-low")
         col_score, col_btn = st.columns([3, 1])
-        col_score.metric("Kết quả", f"{correct}/{len(res.items)} câu đúng", f"{pct}%")
+        with col_score:
+            st.markdown(
+                f'<div class="score-wrap">'
+                f'<span class="score-badge {cls}">{correct}/{len(res.items)}</span>'
+                f'<span class="score-label">{pct}% chính xác</span>'
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            st.progress(pct / 100)
         with col_btn:
             st.write("")
             if st.button("Làm lại", use_container_width=True):
@@ -462,8 +495,16 @@ def run() -> None:
     _init_state()
     document, page = _sidebar()
 
-    st.title("Hệ thống học tập với RAG")
-    st.caption("Hỏi đáp, tóm tắt, quiz, và flashcards có trích dẫn nguồn — dựa trên PDF đã nạp.")
+    col_title, col_ctx = st.columns([3, 1])
+    with col_title:
+        st.markdown(
+            "<h1 style='margin-bottom:.1rem'>Hệ thống học tập với RAG</h1>"
+            "<p style='margin:0 0 1rem;opacity:.6'>Hỏi đáp · Tóm tắt · Quiz · Flashcards — có trích dẫn nguồn từ PDF</p>",
+            unsafe_allow_html=True,
+        )
+    with col_ctx:
+        if document:
+            st.info(f"📄 {document}" + (f"\n\nTrang {page}" if page else ""), icon=None)
 
     tabs = st.tabs(["💬 Hỏi đáp", "📝 Tóm tắt", "📋 Quiz", "🃏 Flashcards", "📖 Lịch sử"])
     with tabs[0]:

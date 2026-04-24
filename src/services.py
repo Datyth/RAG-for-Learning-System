@@ -11,9 +11,9 @@ from src.learning import (
     generate_quiz as _generate_quiz,
     summarize as _summarize,
 )
-from src.rag import answer as _answer, fetch_all_chunks
+from src.rag import answer as _answer
 from src.schemas import FlashcardSet, QuizSet, RagAnswer, Summary
-from src.store import ensure_collection
+from src.store import ensure_collection, scroll_all
 
 
 def ask(
@@ -62,40 +62,36 @@ def flashcards(
 
 
 def list_documents() -> list[dict]:
-    """Return indexed documents with filename, document_id, pages, chunk counts.
-
-    WARNING: scrolls every chunk in the collection -- O(collection_size).
-    Consider Qdrant aggregation or a separate metadata store for large corpora.
-    """
-    chunks = fetch_all_chunks(filters=None)
+    """Return indexed documents with filename, document_id, pages, chunk counts."""
     by_doc: dict[str, dict] = {}
-    for c in chunks:
-        meta = c.metadata
-        info = by_doc.setdefault(
-            meta.filename,
-            {
-                "filename": meta.filename,
-                "document_id": meta.document_id,
-                "pages": set(),
-                "chunk_count": 0,
-            },
-        )
-        info["pages"].add(meta.page)
-        info["chunk_count"] += 1
+    for page in scroll_all(settings.qdrant_collection, with_payload=["metadata"]):
+        for point in page:
+            meta = (point.payload or {}).get("metadata") or {}
+            filename = meta.get("filename")
+            document_id = meta.get("document_id")
+            pg = meta.get("page")
+            if not filename or not document_id or not isinstance(pg, int):
+                continue
+            info = by_doc.setdefault(
+                filename,
+                {"filename": filename, "document_id": document_id, "pages": set(), "chunk_count": 0},
+            )
+            info["pages"].add(pg)
+            info["chunk_count"] += 1
 
-    docs = []
-    for info in by_doc.values():
-        pages = sorted(info["pages"])
-        docs.append(
+    return sorted(
+        [
             {
                 "filename": info["filename"],
                 "document_id": info["document_id"],
-                "pages": pages,
-                "page_count": len(pages),
+                "pages": sorted(info["pages"]),
+                "page_count": len(info["pages"]),
                 "chunk_count": info["chunk_count"],
             }
-        )
-    return sorted(docs, key=lambda d: d["filename"])
+            for info in by_doc.values()
+        ],
+        key=lambda d: d["filename"],
+    )
 
 
 def save_and_ingest_pdf(file_bytes: bytes, filename: str) -> dict:

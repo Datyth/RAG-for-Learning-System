@@ -124,7 +124,8 @@ def ingest(
 
     ensure_collection(recreate=recreate, collection_name=collection_name)
     chunks = build_chunks(
-        pdfs, chunker=chunker,
+        pdfs,
+        chunker=chunker,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )

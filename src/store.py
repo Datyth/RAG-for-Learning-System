@@ -1,5 +1,6 @@
 """Embeddings, Qdrant client, collection setup, and vector store."""
 
+from collections.abc import Iterator
 from functools import lru_cache
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -8,6 +9,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from src.config import settings
+
+_SCROLL_PAGE_SIZE = 256
 
 INDEXED_PAYLOAD_FIELDS: dict[str, qmodels.PayloadSchemaType] = {
     "metadata.document_id": qmodels.PayloadSchemaType.KEYWORD,
@@ -80,6 +83,29 @@ def ensure_collection(recreate: bool = False, collection_name: str | None = None
                 f"Payload index for '{field_name}' has schema "
                 f"{existing_schema!r}, expected {field_schema!r}."
             )
+
+
+def scroll_all(
+    collection_name: str,
+    scroll_filter: qmodels.Filter | None = None,
+    with_payload: bool | list[str] = True,
+) -> Iterator[list]:
+    """Yield pages of Qdrant points (no vectors) until the collection is exhausted."""
+    client = get_client()
+    offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=scroll_filter,
+            limit=_SCROLL_PAGE_SIZE,
+            offset=offset,
+            with_payload=with_payload,
+            with_vectors=False,
+        )
+        yield points
+        if next_offset is None:
+            break
+        offset = next_offset
 
 
 def get_vector_store(collection_name: str | None = None) -> QdrantVectorStore:

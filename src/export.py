@@ -87,18 +87,15 @@ def quiz_to_markdown(quiz: QuizSet) -> str:
         lines.append(item.question.strip())
         lines.append("")
         for opt_idx, option in enumerate(item.options):
-            marker = "x" if opt_idx == item.correct_index else " "
             letter = chr(ord("A") + opt_idx)
-            lines.append(f"- [{marker}] {letter}. {option}")
+            lines.append(f"- {letter}) {option}")
         lines.append("")
         lines.append(f"**Answer:** {chr(ord('A') + item.correct_index)}")
-        lines.append("")
         if item.explanation:
             lines.append(f"**Explanation:** {item.explanation.strip()}")
-            lines.append("")
         if item.source_markers:
             lines.append(f"**Sources:** {', '.join(item.source_markers)}")
-            lines.append("")
+        lines.append("")
 
     citations_md = _citations_block(quiz.citations)
     if citations_md:
@@ -115,21 +112,16 @@ def flashcards_to_markdown(flashcards: FlashcardSet) -> str:
     lines = [title, "", f"_Scope: {flashcards.scope} | Cards: {len(flashcards.cards)}_", ""]
 
     for idx, card in enumerate(flashcards.cards, start=1):
-        header = f"## Card {idx}"
-        if card.topic:
-            header += f" — {card.topic}"
-        lines.append(header)
+        topic = f" — {card.topic}" if card.topic else ""
+        lines.append(f"## Card {idx}{topic}")
         lines.append("")
         lines.append(f"**Front:** {card.front.strip()}")
-        lines.append("")
         lines.append(f"**Back:** {card.back.strip()}")
-        lines.append("")
         if card.hint:
             lines.append(f"**Hint:** {card.hint.strip()}")
-            lines.append("")
         if card.source_markers:
             lines.append(f"**Sources:** {', '.join(card.source_markers)}")
-            lines.append("")
+        lines.append("")
 
     citations_md = _citations_block(flashcards.citations)
     if citations_md:

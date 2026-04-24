@@ -37,12 +37,12 @@ def _print_section(title: str) -> None:
 def _print_answer(text: str) -> None:
     _print_section("Answer")
     typer.echo(text.strip())
-    typer.echo()
 
 
 def _print_sources(chunks: list[RetrievedChunk]) -> None:
     if not chunks:
         return
+    typer.echo()
     _print_section("Sources")
     for i, chunk in enumerate(chunks, start=1):
         meta = chunk.metadata
@@ -93,7 +93,8 @@ def ingest(
     recreate: bool = typer.Option(False, "--recreate", help="Drop and recreate the collection."),
 ) -> None:
     """Ingest every PDF under ./data into Qdrant."""
-    services.ingest_data_dir(recreate=recreate)
+    count = services.ingest_data_dir(recreate=recreate)
+    typer.echo(f"Done. {count} chunks indexed.")
 
 
 @app.command()
@@ -144,6 +145,8 @@ def debug_retrieval(
             + (f" | section={c.metadata.section}" if c.metadata.section else "")
         )
         preview = c.text.strip().replace("\n", " ")
+        if len(preview) > 120:
+            preview = preview[:120] + "…"
         typer.echo(f"    {preview}\n")
 
 
@@ -240,7 +243,7 @@ def flashcards(
 
 def main() -> None:
     logger.remove()
-    logger.add(lambda m: typer.echo(m, err=True), level="INFO")
+    logger.add(lambda m: typer.echo(m, err=True), level="INFO", colorize=True)
     try:
         app()
     finally:

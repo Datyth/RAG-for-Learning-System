@@ -1,5 +1,7 @@
 """Ragas evaluation harness: prepare dataset from live RAG calls and score."""
 
+from collections.abc import Callable
+
 from datasets import Dataset
 from ragas import evaluate
 from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -8,10 +10,14 @@ from ragas.run_config import RunConfig
 
 from src.evaluation.metrics import get_ragas_metrics
 from src.rag import answer as get_rag_answer, get_llm
+from src.schemas import RagAnswer
 from src.store import get_embeddings
 
 
-def prepare_evaluation_dataset(test_cases: list[dict]) -> Dataset:
+def prepare_evaluation_dataset(
+    test_cases: list[dict],
+    answer_fn: Callable[[str], RagAnswer] = get_rag_answer,
+) -> Dataset:
     """Build a HuggingFace Dataset by running RAG on each test case."""
     data: dict[str, list] = {
         "question": [],
@@ -21,7 +27,7 @@ def prepare_evaluation_dataset(test_cases: list[dict]) -> Dataset:
     }
 
     for case in test_cases:
-        rag_response = get_rag_answer(case["question"])
+        rag_response = answer_fn(case["question"])
         data["question"].append(case["question"])
         data["answer"].append(rag_response.answer)
         data["contexts"].append([chunk.text for chunk in rag_response.chunks])
@@ -30,9 +36,12 @@ def prepare_evaluation_dataset(test_cases: list[dict]) -> Dataset:
     return Dataset.from_dict(data)
 
 
-def run_evaluation(test_cases: list[dict]):
+def run_evaluation(
+    test_cases: list[dict],
+    answer_fn: Callable[[str], RagAnswer] = get_rag_answer,
+):
     """Run Ragas evaluation on the given test cases and return the result."""
-    eval_dataset = prepare_evaluation_dataset(test_cases)
+    eval_dataset = prepare_evaluation_dataset(test_cases, answer_fn=answer_fn)
 
     llm = LangchainLLMWrapper(get_llm())
     embeddings = LangchainEmbeddingsWrapper(get_embeddings())

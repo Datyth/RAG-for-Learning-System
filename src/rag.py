@@ -39,8 +39,9 @@ def retrieve(
     query: str,
     k: int | None = None,
     filters: dict[str, str | int] | None = None,
+    collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
-    store = get_vector_store()
+    store = get_vector_store(collection_name=collection_name)
     hits = store.similarity_search_with_score(
         query=query,
         k=k or settings.top_k,
@@ -58,15 +59,17 @@ def retrieve(
 
 def fetch_all_chunks(
     filters: dict[str, str | int] | None = None,
+    collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
     """Scroll every chunk in the collection matching the filter, ordered by page."""
     client = get_client()
+    effective_collection = collection_name or settings.qdrant_collection
     q_filter = _metadata_filter(filters)
     results: list[RetrievedChunk] = []
     offset = None
     while True:
         points, next_offset = client.scroll(
-            collection_name=settings.qdrant_collection,
+            collection_name=effective_collection,
             scroll_filter=q_filter,
             limit=SCROLL_PAGE_SIZE,
             offset=offset,
@@ -208,8 +211,9 @@ def answer(
     question: str,
     k: int | None = None,
     filters: dict[str, str | int] | None = None,
+    collection_name: str | None = None,
 ) -> RagAnswer:
-    chunks = retrieve(question, k=k, filters=filters)
+    chunks = retrieve(question, k=k, filters=filters, collection_name=collection_name)
     if not chunks:
         return RagAnswer(
             question=question,

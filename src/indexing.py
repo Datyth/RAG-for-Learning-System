@@ -4,6 +4,7 @@ import hashlib
 import uuid
 from collections import defaultdict
 from pathlib import Path
+from typing import Protocol
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
@@ -13,6 +14,11 @@ from loguru import logger
 from src.config import settings
 from src.schemas import ChunkMetadata
 from src.store import ensure_collection, get_vector_store
+
+
+class Chunker(Protocol):
+    def split_documents(self, documents: list[Document]) -> list[Document]:
+        """Split page-level documents into chunk-level documents."""
 
 
 def _splitter(
@@ -60,14 +66,20 @@ def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
 
 
 def build_chunks(
-    pdf_paths: list[Path], chunk_size: int | None = None, chunk_overlap: int | None = None
+    pdf_paths: list[Path],
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
+    chunker: Chunker | None = None,
 ) -> list[Document]:
     page_docs: list[Document] = []
     for path in pdf_paths:
         logger.info("Loading PDF: {}", path.name)
         page_docs.extend(_load_pdf(path))
 
-    chunks = _splitter(chunk_size, chunk_overlap).split_documents(page_docs)
+    if chunker is None:
+        chunks = _splitter(chunk_size, chunk_overlap).split_documents(page_docs)
+    else:
+        chunks = chunker.split_documents(page_docs)
 
     per_doc_counter: dict[str, int] = defaultdict(int)
     for chunk in chunks:
@@ -86,7 +98,7 @@ def build_chunks(
     return chunks
 
 
-def index_chunks(chunks: list[Document]) -> int:
+def index_chunks(chunks: list[Document], collection_name: str | None = None) -> int:
     """Compute deterministic UUIDs and add chunks to the vector store.
 
     Re-ingesting the same content upserts instead of creating duplicates.
@@ -94,23 +106,33 @@ def index_chunks(chunks: list[Document]) -> int:
     if not chunks:
         return 0
     ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, c.metadata["chunk_id"])) for c in chunks]
-    get_vector_store().add_documents(chunks, ids=ids)
+    get_vector_store(collection_name=collection_name).add_documents(chunks, ids=ids)
     return len(chunks)
 
 
-def ingest(recreate: bool = False) -> int:
+def ingest(
+    recreate: bool = False,
+    collection_name: str | None = None,
+    chunker: Chunker | None = None,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
+) -> int:
     pdfs = discover_pdfs()
     if not pdfs:
         logger.warning("No PDF files found in {}", settings.data_dir)
         return 0
 
-    ensure_collection(recreate=recreate)
-    chunks = build_chunks(pdfs)
+    ensure_collection(recreate=recreate, collection_name=collection_name)
+    chunks = build_chunks(
+        pdfs, chunker=chunker,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
 
     if not chunks:
         logger.warning("No chunks produced from {} PDF(s)", len(pdfs))
         return 0
 
-    count = index_chunks(chunks)
+    count = index_chunks(chunks, collection_name=collection_name)
     logger.info("Ingested {} chunks from {} PDF(s)", count, len(pdfs))
     return count

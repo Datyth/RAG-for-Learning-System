@@ -42,10 +42,10 @@ def get_client() -> QdrantClient:
     return QdrantClient(path=str(settings.storage_dir))
 
 
-def ensure_collection(recreate: bool = False) -> None:
+def ensure_collection(recreate: bool = False, collection_name: str | None = None) -> None:
     """Create the collection and payload indexes if they do not exist."""
     client = get_client()
-    name = settings.qdrant_collection
+    name = collection_name or settings.qdrant_collection
 
     exists = client.collection_exists(name)
     if exists and recreate:
@@ -82,9 +82,9 @@ def ensure_collection(recreate: bool = False) -> None:
             )
 
 
-def get_vector_store() -> QdrantVectorStore:
+def get_vector_store(collection_name: str | None = None) -> QdrantVectorStore:
     return QdrantVectorStore(
         client=get_client(),
-        collection_name=settings.qdrant_collection,
+        collection_name=collection_name or settings.qdrant_collection,
         embedding=get_embeddings(),
     )

@@ -92,6 +92,7 @@ def _evaluate_strategy(strategy: ChunkingStrategy, output_dir: Path) -> dict[str
     }
 
     try:
+
         def answer_fn(q: str):
             return answer(q, collection_name=collection_name)
 

@@ -69,9 +69,7 @@ def fetch_all_chunks(
             text = payload.get("page_content") or ""
             if not meta or not text:
                 continue
-            results.append(
-                RetrievedChunk(text=text, score=0.0, metadata=ChunkMetadata(**meta))
-            )
+            results.append(RetrievedChunk(text=text, score=0.0, metadata=ChunkMetadata(**meta)))
     results.sort(
         key=lambda r: (
             r.metadata.filename,

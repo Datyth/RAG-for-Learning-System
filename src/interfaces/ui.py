@@ -11,7 +11,6 @@ All user-facing text is in Vietnamese.
 """
 
 import html
-import os
 
 import httpx
 import streamlit as st
@@ -19,8 +18,9 @@ import streamlit as st
 from src.export import flashcards_to_markdown, quiz_to_markdown, summary_to_markdown
 from src.interfaces.styles import GLOBAL_CSS
 from src.schemas import Citation, FlashcardSet, QuizSet, RagAnswer, RetrievedChunk, Summary
+from src.config import settings
 
-_API = os.environ.get("RAG_API_URL", "http://localhost:8000")
+_API = settings.api_url
 _ALL_DOCS = "(Tất cả tài liệu)"
 _ALL_PAGES = "(Tất cả trang)"
 
@@ -53,9 +53,9 @@ def _render_citations(citations: list[Citation]) -> None:
         return
     chips = "".join(
         f'<span class="src-chip">'
-        f'<b>{html.escape(c.source_marker)}</b>'
+        f"<b>{html.escape(c.source_marker)}</b>"
         f'<span class="src-chip-meta">{html.escape(c.filename)} tr.{c.page}'
-        f'{" · " + html.escape(c.section) if c.section else ""}</span>'
+        f"{' · ' + html.escape(c.section) if c.section else ''}</span>"
         f"</span>"
         for c in citations
     )
@@ -204,7 +204,12 @@ def _tab_summary(document: str | None, page: int | None) -> None:
         st.warning("Không tìm thấy nội dung phù hợp để tóm tắt.")
         return
 
-    scope_label = {"query": "Theo chủ đề", "document": "Theo tài liệu", "filter": "Theo bộ lọc", "corpus": "Toàn bộ kho"}.get(res.scope, res.scope)
+    scope_label = {
+        "query": "Theo chủ đề",
+        "document": "Theo tài liệu",
+        "filter": "Theo bộ lọc",
+        "corpus": "Toàn bộ kho",
+    }.get(res.scope, res.scope)
     st.caption(f"Phạm vi: {scope_label}" + (f" · {res.target}" if res.target else ""))
     st.markdown(res.summary)
     if res.key_points:

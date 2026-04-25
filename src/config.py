@@ -1,72 +1,72 @@
-"""Application configuration. All runtime options live here; `.env` is for secrets only."""
+"""Application configuration.
 
-from dataclasses import dataclass
-from os import getenv
+Defaults live in code.
+Secrets and machine-specific overrides come from environment variables.
+"""
+
+from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-def _secret(name: str) -> str | None:
-    v = getenv(name)
-    return v.strip() if v and v.strip() else None
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-@dataclass(frozen=True)
-class Settings:
-    """Edit runtime options below. Only secrets should ever come from `.env`."""
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="RAG_",
+        extra="ignore",
+    )
 
-    data_dir: Path
-    storage_dir: Path
-    qdrant_collection: str
+    data_dir: Path = Path("data")
+    storage_dir: Path = Path("storage/qdrant")
+    qdrant_collection: str = "rag_chunks"
 
-    chunk_size: int
-    chunk_overlap: int
-    embedding_model: str
-    top_k: int
+    chunk_size: int = Field(default=1000, ge=100)
+    chunk_overlap: int = Field(default=150, ge=0)
+    top_k: int = Field(default=5, ge=1, le=64)
 
-    llm_provider: str  # "hf_local" | "gemini" | "vllm"
-    llm_temperature: float
+    embedding_model: str = "GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1"
 
-    hf_model: str
-    hf_device: int  # -1 = CPU, 0+ = CUDA device index
-    hf_max_new_tokens: int
+    llm_provider: Literal["hf_local", "gemini", "vllm"] = "hf_local"
+    llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
 
-    gemini_model: str
-    google_api_key: str | None
+    hf_model: str = "/mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507"
+    hf_device: int = 1
+    hf_max_new_tokens: int = Field(default=2048, ge=1)
 
-    vllm_api_base: str
-    vllm_api_key: str
+    gemini_model: str = "gemini-2.5-flash"
+    google_api_key: str | None = Field(default=None, validation_alias="GOOGLE_API_KEY")
 
-    summarize_batch_size: int
-    summarize_retrieval_k: int
-    quiz_default_count: int
-    flashcards_default_count: int
-    generation_retrieval_k: int
+    vllm_api_base: str = "http://localhost:8001/v1"
+    vllm_api_key: str = "EMPTY"
+
+    summarize_batch_size: int = Field(default=10, ge=1)
+    summarize_retrieval_k: int = Field(default=12, ge=1, le=128)
+    generation_retrieval_k: int = Field(default=16, ge=1, le=128)
+    quiz_default_count: int = Field(default=8, ge=1, le=50)
+    flashcards_default_count: int = Field(default=15, ge=1, le=100)
+
+    api_url: str = "http://localhost:8000"
+
+    @model_validator(mode="after")
+    def validate_config(self) -> "Settings":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size.")
+
+        if self.hf_device < -1:
+            raise ValueError("hf_device must be -1 for CPU or >= 0 for CUDA.")
+
+        if self.llm_provider == "gemini" and not self.google_api_key:
+            raise ValueError("GOOGLE_API_KEY is required when llm_provider='gemini'.")
+
+        return self
 
 
-settings = Settings(
-    data_dir=Path("./data"),
-    storage_dir=Path("./storage/qdrant"),
-    qdrant_collection="rag_chunks",
-    chunk_size=1000,
-    chunk_overlap=150,
-    embedding_model="GreenNode/GreenNode-Embedding-Large-VN-Mixed-V1",
-    top_k=5,
-    llm_provider="hf_local",
-    llm_temperature=0.1,
-    hf_model="/mnt/pretrained_fm/Qwen_Qwen3-4B-Instruct-2507",
-    hf_device=1,
-    hf_max_new_tokens=2048,
-    gemini_model="gemini-2.5-flash",
-    google_api_key=_secret("GOOGLE_API_KEY"),
-    vllm_api_base="http://localhost:8001/v1",
-    vllm_api_key="EMPTY",
-    summarize_batch_size=10,
-    summarize_retrieval_k=12,
-    quiz_default_count=8,
-    flashcards_default_count=15,
-    generation_retrieval_k=16,
-)
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

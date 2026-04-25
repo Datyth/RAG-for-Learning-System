@@ -198,9 +198,6 @@ def summarize(
     )
 
 
-def _validate_quiz_items(payload: object, valid_markers: set[str]) -> list[QuizItem]:
-    return _validate_items(payload, "items", QuizItem, "question", "quiz items", valid_markers)
-
 
 def generate_quiz(
     document: str | None = None,
@@ -211,10 +208,8 @@ def generate_quiz(
 ) -> QuizSet:
     """Grounded multiple-choice quiz; raises GenerationError if output is unparseable."""
     chunks, scope, target = _resolve_target(
-        document=document,
-        query=query,
-        filters=filters,
-        k=k,
+        document=document, query=query,
+        filters=filters, k=k,
         retrieval_k=settings.generation_retrieval_k,
     )
     if not chunks:
@@ -225,7 +220,7 @@ def generate_quiz(
 
     prompt = render_prompt(QUIZ_TEMPLATE, chunks=chunks, count=n)
     payload = _parse_json(invoke_llm(prompt))
-    items = _validate_quiz_items(payload, valid_markers)
+    items = _validate_items(payload, "items", QuizItem, "question", "quiz items", valid_markers)
 
     return QuizSet(
         scope=scope,
@@ -233,10 +228,6 @@ def generate_quiz(
         items=items,
         citations=format_citations(chunks),
     )
-
-
-def _validate_flashcards(payload: object, valid_markers: set[str]) -> list[Flashcard]:
-    return _validate_items(payload, "cards", Flashcard, "front", "flashcards", valid_markers)
 
 
 def generate_flashcards(
@@ -262,7 +253,7 @@ def generate_flashcards(
 
     prompt = render_prompt(FLASHCARDS_TEMPLATE, chunks=chunks, count=n)
     payload = _parse_json(invoke_llm(prompt))
-    cards = _validate_flashcards(payload, valid_markers)
+    cards = _validate_items(payload, "cards", Flashcard, "front", "flashcards", valid_markers)
 
     return FlashcardSet(
         scope=scope,

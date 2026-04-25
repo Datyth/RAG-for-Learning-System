@@ -58,7 +58,7 @@ class QuizItem(BaseModel):
     """A single multiple-choice quiz item grounded in the source material."""
 
     question: str
-    options: list[str] = Field(min_length=2)
+    options: list[str] = Field(min_length=4, max_length=4)
     correct_index: int
     explanation: str
     source_markers: list[str] = Field(default_factory=list)

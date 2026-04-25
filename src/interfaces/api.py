@@ -87,7 +87,7 @@ def health() -> dict[str, str]:
 @app.get("/documents", response_model=list[DocumentInfo])
 def documents() -> list[DocumentInfo]:
     """List every document currently indexed in the vector store."""
-    return [DocumentInfo(**d) for d in services.list_documents()]
+    return services.list_documents()
 
 
 @app.post("/upload", response_model=UploadResponse)
@@ -95,7 +95,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     """Accept a PDF upload, persist it to data_dir, and index its chunks."""
     content = await file.read()
     try:
-        return UploadResponse(**services.save_and_ingest_pdf(content, file.filename or ""))
+        return services.save_and_ingest_pdf(content, file.filename or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -103,14 +103,11 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=RagAnswer)
 def ask(req: AskRequest) -> RagAnswer:
     """Grounded Q&A with inline source citations."""
-    try:
-        return services.ask(
-            req.question,
-            k=req.k,
-            filters=_filters_to_dict(req.filters),
-        )
-    except GenerationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return services.ask(
+        req.question,
+        k=req.k,
+        filters=_filters_to_dict(req.filters),
+    )
 
 
 @app.post("/summarize", response_model=Summary)

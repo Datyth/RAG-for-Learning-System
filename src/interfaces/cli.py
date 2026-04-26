@@ -7,7 +7,6 @@ import typer
 from loguru import logger
 from pydantic import BaseModel
 
-from src import services
 from src.export import (
     model_to_text,
     to_json,
@@ -15,8 +14,14 @@ from src.export import (
     write_markdown,
     write_text,
 )
-from src.learning import GenerationError
-from src.rag import retrieve
+from src.indexing import ingest as ingest_data_dir
+from src.learning import (
+    GenerationError,
+    generate_flashcards,
+    generate_quiz,
+    summarize as summarize_learning,
+)
+from src.rag import answer, retrieve
 from src.schemas import RetrievedChunk
 from src.store import close_client
 
@@ -93,7 +98,7 @@ def ingest(
     recreate: bool = typer.Option(False, "--recreate", help="Drop and recreate the collection."),
 ) -> None:
     """Ingest every PDF under ./data into Qdrant."""
-    count = services.ingest_data_dir(recreate=recreate)
+    count = ingest_data_dir(recreate=recreate)
     typer.echo(f"Done. {count} chunks indexed.")
 
 
@@ -109,7 +114,7 @@ def ask(
     ),
 ) -> None:
     """Answer a question using retrieved context only."""
-    result = services.ask(question, k=k, filters=_parse_filters(filters))
+    result = answer(question, k=k, filters=_parse_filters(filters))
     _print_answer(result.answer)
     _print_sources(result.chunks)
 
@@ -170,7 +175,7 @@ def summarize(
     """Generate a grounded study summary of a document, filter, or topic."""
     fmt = _validate_format(fmt)
     try:
-        result = services.summarize(
+        result = summarize_learning(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -198,7 +203,7 @@ def quiz(
     """Generate a grounded multiple-choice quiz set."""
     fmt = _validate_format(fmt)
     try:
-        result = services.quiz(
+        result = generate_quiz(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -227,7 +232,7 @@ def flashcards(
     """Generate a grounded flashcard set for study and review."""
     fmt = _validate_format(fmt)
     try:
-        result = services.flashcards(
+        result = generate_flashcards(
             document=document,
             query=query,
             filters=_parse_filters(filters),

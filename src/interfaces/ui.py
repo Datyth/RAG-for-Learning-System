@@ -24,7 +24,6 @@ from src.interfaces.styles import GLOBAL_CSS
 from src.schemas import Citation, FlashcardSet, QuizSet, RagAnswer, RetrievedChunk, Summary
 
 _API = settings.api_url
-_ALL_DOCS = "(Tất cả tài liệu)"
 _ALL_PAGES = "(Tất cả trang)"
 T = TypeVar("T", bound=BaseModel)
 
@@ -52,31 +51,26 @@ def _post_model(path: str, payload: dict, model: type[T], err: str) -> T | None:
     return model.model_validate(r.json())
 
 
-def _filters_json(document: str | None, page: int | None) -> dict | None:
-    f = {}
-    if document:
-        f["filename"] = document
+def _filters_json(filenames: list[str], page: int | None) -> dict | None:
+    f: dict = {}
+    if filenames:
+        f["filenames"] = filenames  # API model_validator normalizes single-item to filename
     if page is not None:
         f["page"] = page
     return f or None
 
 
 def _init_state() -> None:
-    for key, default in {"chat_history": [], "history": [], "uploaded_files": set()}.items():
+    for key, default in {"chat_history": [], "uploaded_files": set(), "doc_checks": {}}.items():
         st.session_state.setdefault(key, default)
-
-
-def _history(kind: str, target: str | None, count: int | None = None) -> None:
-    item: dict[str, object] = {"kind": kind, "target": target}
-    if count is not None:
-        item["count"] = count
-    st.session_state.history.append(item)
 
 
 def _downloads(res: BaseModel, stem: str, md_fn: Callable[[object], str]) -> None:
     st.divider()
     c1, c2 = st.columns(2)
-    c1.download_button("Tải JSON", res.model_dump_json(indent=2), f"{stem}.json", "application/json")
+    c1.download_button(
+        "Tải JSON", res.model_dump_json(indent=2), f"{stem}.json", "application/json"
+    )
     c2.download_button("Tải Markdown", md_fn(res), f"{stem}.md", "text/markdown")
 
 
@@ -98,11 +92,13 @@ def _render_chunks(chunks: list[RetrievedChunk]) -> None:
         return
     with st.expander("Chi tiết đoạn văn được trích", expanded=False):
         for i, c in enumerate(chunks, 1):
-            st.markdown(f"**[S{i}] {c.metadata.filename} — trang {c.metadata.page}** · điểm: {c.score:.3f}")
+            st.markdown(
+                f"**[S{i}] {c.metadata.filename} — trang {c.metadata.page}** · điểm: {c.score:.3f}"
+            )
             st.code(c.text.strip(), language="text")
 
 
-def _sidebar() -> tuple[str | None, int | None]:
+def _sidebar() -> tuple[list[str], int | None]:
     st.sidebar.markdown(
         "<h2 style='margin:0 0 .1rem;font-size:1.3rem'>📚 RAG Learning</h2>"
         "<p style='margin:0 0 1rem;opacity:.55;font-size:.82rem'>Học tập thông minh với AI</p>",
@@ -110,7 +106,9 @@ def _sidebar() -> tuple[str | None, int | None]:
     )
 
     st.sidebar.subheader("Tải tài liệu PDF")
-    uploaded = st.sidebar.file_uploader("Chọn một hoặc nhiều PDF", type=["pdf"], accept_multiple_files=True, key="uploader")
+    uploaded = st.sidebar.file_uploader(
+        "Chọn một hoặc nhiều PDF", type=["pdf"], accept_multiple_files=True, key="uploader"
+    )
     for f in uploaded or []:
         if f.name in st.session_state.uploaded_files:
             continue
@@ -121,42 +119,67 @@ def _sidebar() -> tuple[str | None, int | None]:
                 continue
             info = r.json()
         st.session_state.uploaded_files.add(f.name)
+        st.session_state.pop("cached_docs", None)
         st.sidebar.success(f"Đã nạp **{info['filename']}** · {info['chunks_indexed']} đoạn")
 
-    st.sidebar.divider()
     st.sidebar.subheader("Bộ lọc tài liệu")
-    try:
-        docs = _api("GET", "/documents").json()
-    except Exception as exc:
-        st.sidebar.error(f"Không đọc được tài liệu: {exc}")
-        docs = []
+    if "cached_docs" not in st.session_state:
+        try:
+            st.session_state.cached_docs = _api("GET", "/documents").json()
+        except Exception as exc:
+            st.sidebar.error(f"Không đọc được tài liệu: {exc}")
+            st.session_state.cached_docs = []
+    docs = st.session_state.cached_docs
 
     doc_map = {d["filename"]: d for d in docs}
-    selected = st.sidebar.selectbox("Tài liệu", [_ALL_DOCS, *doc_map], index=0, key="doc_select")
+    options = list(doc_map)
     page = None
-
-    if selected == _ALL_DOCS:
-        st.sidebar.caption("Chọn tài liệu để lọc theo trang.")
-    else:
-        chosen = st.sidebar.selectbox("Trang", [_ALL_PAGES, *map(str, doc_map[selected]["pages"])], index=0, key="page_select")
-        page = None if chosen == _ALL_PAGES else int(chosen)
 
     if docs:
         c1, c2 = st.sidebar.columns(2)
         c1.metric("Tài liệu", len(docs))
-        c2.metric("Đoạn văn", sum(d["chunk_count"] for d in docs))
-        with st.sidebar.expander("Xem chi tiết kho"):
-            for d in docs:
-                st.markdown(
-                    f"**{d['filename']}**  \n"
-                    f"<span style='font-size:.8rem;opacity:.6'>{d['page_count']} trang · {d['chunk_count']} đoạn</span>",
-                    unsafe_allow_html=True,
-                )
+        c2.metric("Đoạn", sum(d["chunk_count"] for d in docs))
 
-    return (None if selected == _ALL_DOCS else selected), page
+    checks: dict[str, bool] = st.session_state.doc_checks
+    known = set(options)
+    for k in list(checks):
+        if k not in known:
+            checks.pop(k, None)
+            st.session_state.pop(f"doc_cb_{k}", None)
+    for fn in options:
+        checks.setdefault(fn, True)
+        st.session_state.setdefault(f"doc_cb_{fn}", True)
+
+    b1, b2 = st.sidebar.columns(2)
+    if b1.button("Chọn tất cả", use_container_width=True):
+        for fn in options:
+            checks[fn] = True
+            st.session_state[f"doc_cb_{fn}"] = True
+        st.rerun()
+    if b2.button("Bỏ chọn", use_container_width=True):
+        for fn in options:
+            checks[fn] = False
+            st.session_state[f"doc_cb_{fn}"] = False
+        st.rerun()
+
+    box = st.sidebar.container(height=240) if len(options) > 12 else st.sidebar
+    for fn in options:
+        checks[fn] = box.checkbox(fn, value=bool(checks.get(fn)), key=f"doc_cb_{fn}")
+
+    filenames = [fn for fn in options if checks.get(fn)]
+    if len(filenames) == 1:
+        pages = doc_map[filenames[0]]["pages"]
+        chosen = st.sidebar.selectbox(
+            "Trang", [_ALL_PAGES, *map(str, pages)], index=0, key="page_select"
+        )
+        page = None if chosen == _ALL_PAGES else int(chosen)
+    elif len(filenames) > 1:
+        st.sidebar.caption("Lọc theo trang không áp dụng khi chọn nhiều tài liệu.")
+
+    return filenames, page
 
 
-def _tab_chat(document: str | None, page: int | None) -> None:
+def _tab_chat(filenames: list[str], page: int | None) -> None:
     st.subheader("Hỏi đáp có trích dẫn")
     st.caption("Đặt câu hỏi về nội dung đã nạp. Bộ lọc ở thanh bên sẽ thu hẹp phạm vi tìm kiếm.")
 
@@ -175,7 +198,12 @@ def _tab_chat(document: str | None, page: int | None) -> None:
         st.markdown(q)
     with st.chat_message("assistant"):
         with st.spinner("Đang suy nghĩ..."):
-            res = _post_model("/ask", {"question": q, "filters": _filters_json(document, page)}, RagAnswer, "Không thể trả lời")
+            res = _post_model(
+                "/ask",
+                {"question": q, "filters": _filters_json(filenames, page)},
+                RagAnswer,
+                "Không thể trả lời",
+            )
         if not res:
             return
         st.markdown(res.answer)
@@ -192,7 +220,7 @@ def _tab_chat(document: str | None, page: int | None) -> None:
     )
 
 
-def _tab_summary(document: str | None, page: int | None) -> None:
+def _tab_summary(filenames: list[str], page: int | None) -> None:
     st.subheader("Tóm tắt tài liệu")
     with st.form("summary_form"):
         query = st.text_input("Chủ đề hướng dẫn (tuỳ chọn)")
@@ -204,7 +232,12 @@ def _tab_summary(document: str | None, page: int | None) -> None:
     with st.spinner("Đang tóm tắt..."):
         res = _post_model(
             "/summarize",
-            {"document": document, "query": query or None, "filters": _filters_json(None, page), "k": int(k)},
+            {
+                "document": None,
+                "query": query or None,
+                "filters": _filters_json(filenames, page),
+                "k": int(k),
+            },
             Summary,
             "Không thể tóm tắt",
         )
@@ -214,7 +247,12 @@ def _tab_summary(document: str | None, page: int | None) -> None:
         st.warning("Không tìm thấy nội dung phù hợp để tóm tắt.")
         return
 
-    scope = {"query": "Theo chủ đề", "document": "Theo tài liệu", "filter": "Theo bộ lọc", "corpus": "Toàn bộ kho"}.get(res.scope, res.scope)
+    scope = {
+        "query": "Theo chủ đề",
+        "document": "Theo tài liệu",
+        "filter": "Theo bộ lọc",
+        "corpus": "Toàn bộ kho",
+    }.get(res.scope, res.scope)
     st.caption(f"Phạm vi: {scope}" + (f" · {res.target}" if res.target else ""))
     st.markdown(res.summary)
 
@@ -227,7 +265,6 @@ def _tab_summary(document: str | None, page: int | None) -> None:
 
     _render_citations(res.citations)
     _downloads(res, "summary", summary_to_markdown)
-    _history("summary", res.target)
 
 
 def _clear_quiz_state() -> None:
@@ -235,7 +272,7 @@ def _clear_quiz_state() -> None:
         del st.session_state[k]
 
 
-def _tab_quiz(document: str | None, page: int | None) -> None:
+def _tab_quiz(filenames: list[str], page: int | None) -> None:
     st.subheader("Tạo bộ câu hỏi")
 
     with st.expander("Tạo quiz mới", expanded="quiz_res" not in st.session_state):
@@ -249,7 +286,13 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
             with st.spinner("Đang tạo quiz..."):
                 res = _post_model(
                     "/quiz",
-                    {"document": document, "query": query or None, "filters": _filters_json(None, page), "count": int(count), "k": int(k)},
+                    {
+                        "document": None,
+                        "query": query or None,
+                        "filters": _filters_json(filenames, page),
+                        "count": int(count),
+                        "k": int(k),
+                    },
                     QuizSet,
                     "Không thể tạo quiz",
                 )
@@ -257,7 +300,6 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
                 st.session_state.quiz_res = res
                 st.session_state.quiz_submitted = False
                 _clear_quiz_state()
-                _history("quiz", res.target, len(res.items))
 
     if "quiz_res" not in st.session_state:
         return
@@ -266,7 +308,10 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
     submitted = st.session_state.get("quiz_submitted", False)
 
     if submitted:
-        correct = sum(st.session_state.get(f"quiz_ans_{i}") == item.correct_index for i, item in enumerate(res.items))
+        correct = sum(
+            st.session_state.get(f"quiz_ans_{i}") == item.correct_index
+            for i, item in enumerate(res.items)
+        )
         pct = int(100 * correct / len(res.items))
         cls = "score-high" if pct >= 70 else "score-mid" if pct >= 40 else "score-low"
         col_score, col_btn = st.columns([3, 1])
@@ -304,7 +349,9 @@ def _tab_quiz(document: str | None, page: int | None) -> None:
 
             if submitted:
                 ans = st.session_state.get(f"quiz_ans_{i}")
-                correct_label = f"**{chr(65 + item.correct_index)}. {item.options[item.correct_index]}**"
+                correct_label = (
+                    f"**{chr(65 + item.correct_index)}. {item.options[item.correct_index]}**"
+                )
                 if ans == item.correct_index:
                     st.success(f"Đúng! Đáp án: {correct_label}")
                 elif ans is None:
@@ -336,7 +383,7 @@ def _fc_card_html(face: str, side: str, topic: str | None, hint: str | None, fli
     )
 
 
-def _tab_flashcards(document: str | None, page: int | None) -> None:
+def _tab_flashcards(filenames: list[str], page: int | None) -> None:
     st.subheader("Tạo thẻ ghi nhớ")
 
     with st.expander("Tạo bộ thẻ mới", expanded="fc_res" not in st.session_state):
@@ -350,7 +397,13 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
             with st.spinner("Đang tạo flashcards..."):
                 res = _post_model(
                     "/flashcards",
-                    {"document": document, "query": query or None, "filters": _filters_json(None, page), "count": int(count), "k": int(k)},
+                    {
+                        "document": None,
+                        "query": query or None,
+                        "filters": _filters_json(filenames, page),
+                        "count": int(count),
+                        "k": int(k),
+                    },
                     FlashcardSet,
                     "Không thể tạo thẻ",
                 )
@@ -358,7 +411,6 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
                 st.session_state.fc_res = res
                 st.session_state.fc_idx = 0
                 st.session_state.fc_flipped = False
-                _history("flashcards", res.target, len(res.cards))
 
     if "fc_res" not in st.session_state:
         return
@@ -375,13 +427,21 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
 
     st.progress((idx + 1) / len(cards), text=f"Thẻ {idx + 1} / {len(cards)}")
     st.markdown(
-        _fc_card_html(card.back if flipped else card.front, "Mặt sau" if flipped else "Mặt trước", card.topic, card.hint, flipped),
+        _fc_card_html(
+            card.back if flipped else card.front,
+            "Mặt sau" if flipped else "Mặt trước",
+            card.topic,
+            card.hint,
+            flipped,
+        ),
         unsafe_allow_html=True,
     )
 
     _, col_flip, _ = st.columns([1, 2, 1])
     with col_flip:
-        if st.button("Lật lại" if flipped else "Xem đáp án", use_container_width=True, type="primary"):
+        if st.button(
+            "Lật lại" if flipped else "Xem đáp án", use_container_width=True, type="primary"
+        ):
             st.session_state.fc_flipped = not flipped
             st.rerun()
 
@@ -404,39 +464,11 @@ def _tab_flashcards(document: str | None, page: int | None) -> None:
     _downloads(res, "flashcards", flashcards_to_markdown)
 
 
-def _tab_history() -> None:
-    st.subheader("Lịch sử học tập")
-    if not st.session_state.chat_history and not st.session_state.history:
-        st.info("Chưa có hoạt động nào trong phiên này.")
-        return
-
-    if st.session_state.chat_history:
-        st.markdown("#### Hỏi đáp")
-        for msg in st.session_state.chat_history:
-            preview = msg["content"].strip().replace("\n", " ")
-            preview = preview[:157] + "..." if len(preview) > 160 else preview
-            st.markdown(f"- **{'Bạn' if msg['role'] == 'user' else 'Trợ lý'}:** {preview}")
-        if st.button("Xoá lịch sử hỏi đáp"):
-            st.session_state.chat_history = []
-            st.rerun()
-
-    if st.session_state.history:
-        st.markdown("#### Các tạo sinh gần đây")
-        labels = {"summary": "Tóm tắt", "quiz": "Quiz", "flashcards": "Flashcards"}
-        for i, h in enumerate(st.session_state.history, 1):
-            target = h.get("target") or "(toàn bộ kho)"
-            count = f" · {h['count']} mục" if "count" in h else ""
-            st.markdown(f"{i}. **{labels.get(h['kind'], h['kind'])}** — {target}{count}")
-        if st.button("Xoá lịch sử tạo sinh"):
-            st.session_state.history = []
-            st.rerun()
-
-
 def run() -> None:
     st.set_page_config(page_title="RAG Learning", page_icon="📚", layout="wide")
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
     _init_state()
-    document, page = _sidebar()
+    filenames, page = _sidebar()
 
     col_title, col_ctx = st.columns([3, 1])
     with col_title:
@@ -446,15 +478,17 @@ def run() -> None:
             unsafe_allow_html=True,
         )
     with col_ctx:
-        if document:
-            st.info(f"📄 {document}" + (f"\n\nTrang {page}" if page else ""), icon=None)
+        if not filenames:
+            st.info("📚 Toàn bộ kho tài liệu", icon=None)
+        elif len(filenames) == 1:
+            st.info(f"📄 {filenames[0]}" + (f"\n\nTrang {page}" if page else ""), icon=None)
+        else:
+            st.info(f"📄 {len(filenames)} tài liệu đã chọn", icon=None)
 
-    tabs = st.tabs(["💬 Hỏi đáp", "📝 Tóm tắt", "📋 Quiz", "🃏 Flashcards", "📖 Lịch sử"])
+    tabs = st.tabs(["💬 Hỏi đáp", "📝 Tóm tắt", "📋 Quiz", "🃏 Flashcards"])
     for tab, fn in zip(tabs, [_tab_chat, _tab_summary, _tab_quiz, _tab_flashcards]):
         with tab:
-            fn(document, page)
-    with tabs[4]:
-        _tab_history()
+            fn(filenames, page)
 
 
 run()

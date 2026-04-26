@@ -28,7 +28,6 @@ dependencies = [
     "sentence-transformers>=5.4,<6",
     "streamlit>=1.40,<2",
     "torch==2.10.0",
-    "torchaudio==2.10.0",
     "torchvision==0.25.0",
     "transformers>=4.56.0,<5",
     "typer>=0.24,<0.25",

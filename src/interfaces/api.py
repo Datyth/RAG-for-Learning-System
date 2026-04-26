@@ -2,20 +2,39 @@
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from src import services
-from src.learning import GenerationError
+from src.indexing import save_and_ingest_pdf
+from src.learning import (
+    GenerationError,
+    generate_flashcards,
+    generate_quiz,
+    summarize as summarize_learning,
+)
+from src.rag import answer
 from src.schemas import FlashcardSet, QuizSet, RagAnswer, Summary
+from src.store import list_documents
 
 
 class MetadataFilter(BaseModel):
     """Retrieval filter applied against indexed chunk metadata."""
 
     filename: str | None = None
+    filenames: list[str] | None = None
     page: int | None = None
     section: str | None = None
     document_id: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "MetadataFilter":
+        names = [x for x in (self.filenames or []) if x]
+        if not names:
+            self.filenames = None
+        elif len(names) == 1:
+            self.filename, self.filenames = names[0], None
+        else:
+            self.filename, self.filenames, self.page = None, names, None
+        return self
 
 
 class AskRequest(BaseModel):
@@ -56,11 +75,10 @@ class UploadResponse(BaseModel):
     chunks_indexed: int
 
 
-def _filters_to_dict(f: MetadataFilter | None) -> dict[str, str | int] | None:
+def _filters_to_dict(f: MetadataFilter | None) -> dict[str, object] | None:
     if f is None:
         return None
-    data = f.model_dump(exclude_none=True)
-    return data or None
+    return f.model_dump(exclude_none=True) or None
 
 
 app = FastAPI(
@@ -87,7 +105,7 @@ def health() -> dict[str, str]:
 @app.get("/documents", response_model=list[DocumentInfo])
 def documents() -> list[DocumentInfo]:
     """List every document currently indexed in the vector store."""
-    return services.list_documents()
+    return list_documents()
 
 
 @app.post("/upload", response_model=UploadResponse)
@@ -95,7 +113,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     """Accept a PDF upload, persist it to data_dir, and index its chunks."""
     content = await file.read()
     try:
-        return services.save_and_ingest_pdf(content, file.filename or "")
+        return save_and_ingest_pdf(content, file.filename or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -103,18 +121,14 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=RagAnswer)
 def ask(req: AskRequest) -> RagAnswer:
     """Grounded Q&A with inline source citations."""
-    return services.ask(
-        req.question,
-        k=req.k,
-        filters=_filters_to_dict(req.filters),
-    )
+    return answer(req.question, k=req.k, filters=_filters_to_dict(req.filters))
 
 
 @app.post("/summarize", response_model=Summary)
 def summarize(req: SummarizeRequest) -> Summary:
     """Grounded summary scoped by document, query, or filter."""
     try:
-        return services.summarize(
+        return summarize_learning(
             document=req.document,
             query=req.query,
             filters=_filters_to_dict(req.filters),
@@ -128,7 +142,7 @@ def summarize(req: SummarizeRequest) -> Summary:
 def quiz(req: QuizRequest) -> QuizSet:
     """Generate a grounded multiple-choice quiz."""
     try:
-        return services.quiz(
+        return generate_quiz(
             document=req.document,
             query=req.query,
             filters=_filters_to_dict(req.filters),
@@ -143,7 +157,7 @@ def quiz(req: QuizRequest) -> QuizSet:
 def flashcards(req: FlashcardsRequest) -> FlashcardSet:
     """Generate a grounded flashcard set."""
     try:
-        return services.flashcards(
+        return generate_flashcards(
             document=req.document,
             query=req.query,
             filters=_filters_to_dict(req.filters),

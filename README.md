@@ -57,14 +57,13 @@ flowchart TD
     Input(["Question / Document"])
     RAG["rag.py — retrieve · render_prompt · invoke_llm"]
     LRN["learning.py — summarize · quiz · flashcards"]
-    SVC["services.py — unified service layer"]
     API["FastAPI :8000"]
     CLI["CLI — Typer"]
     UI["Streamlit UI — httpx"]
 
     Input --> RAG & LRN
-    RAG & LRN --> SVC
-    SVC --> API & CLI
+    RAG --> API & CLI
+    LRN --> API & CLI
     API --> UI
 ```
 
@@ -80,7 +79,6 @@ flowchart TD
 | `src/store.py` | `@lru_cache` singletons: Qdrant client, embeddings, vector store |
 | `src/rag.py` | Retrieval, prompt rendering, LLM invocation, citation parsing |
 | `src/learning.py` | Summarize (map/reduce), quiz, flashcard generation |
-| `src/services.py` | Service layer shared by FastAPI and CLI |
 | `src/export.py` | JSON and Markdown serialization |
 | `src/interfaces/` | CLI (Typer), API (FastAPI), UI (Streamlit via HTTP) |
 | `src/prompts/` | Jinja2 prompt templates |
@@ -323,7 +321,7 @@ Features:
 - Card-by-card flashcard study mode with flip interaction
 - Interactive quiz with radio answers, scoring, and per-question feedback
 - Export results as JSON or Markdown
-- Session-scoped chat and learning history
+- Session-scoped chat history inside the Q&A tab
 
 </details>
 
@@ -385,7 +383,6 @@ src/
 ├── indexing.py         # PDF loading, chunking, ingestion
 ├── rag.py              # Retrieval, prompting, LLM abstraction
 ├── learning.py         # Summarize, quiz, flashcard generation
-├── services.py         # Service layer shared by all interfaces
 ├── export.py           # JSON / Markdown serialization
 ├── prompts/            # Jinja2 templates — edit to change LLM behaviour
 ├── evaluation/         # Offline Ragas evaluation (evaluator, metrics)

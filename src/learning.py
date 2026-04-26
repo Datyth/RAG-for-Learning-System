@@ -75,12 +75,12 @@ def _parse_json(text: str) -> dict | list:
 def _resolve_target(
     document: str | None,
     query: str | None,
-    filters: dict[str, str | int] | None,
+    filters: dict[str, object] | None,
     k: int | None,
     retrieval_k: int,
 ) -> tuple[list[RetrievedChunk], str, str | None]:
     """Resolve input options into (chunks, scope, target_label)."""
-    effective_filters: dict[str, str | int] = dict(filters or {})
+    effective_filters: dict[str, object] = dict(filters or {})
     if document:
         effective_filters["filename"] = document
 
@@ -155,7 +155,7 @@ def _validate_summary_payload(payload: object) -> tuple[str, list[str]]:
 def summarize(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     k: int | None = None,
 ) -> Summary:
     """Grounded summary; uses map-reduce when chunk count exceeds batch size."""
@@ -198,18 +198,19 @@ def summarize(
     )
 
 
-
 def generate_quiz(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     count: int | None = None,
     k: int | None = None,
 ) -> QuizSet:
     """Grounded multiple-choice quiz; raises GenerationError if output is unparseable."""
     chunks, scope, target = _resolve_target(
-        document=document, query=query,
-        filters=filters, k=k,
+        document=document,
+        query=query,
+        filters=filters,
+        k=k,
         retrieval_k=settings.generation_retrieval_k,
     )
     if not chunks:
@@ -233,7 +234,7 @@ def generate_quiz(
 def generate_flashcards(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     count: int | None = None,
     k: int | None = None,
 ) -> FlashcardSet:

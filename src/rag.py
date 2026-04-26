@@ -17,17 +17,27 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 ANSWER_TEMPLATE = "answer.jinja2"
 
 
-def _metadata_filter(filters: dict[str, str | int] | None) -> qmodels.Filter | None:
+def _metadata_filter(filters: dict[str, object] | None) -> qmodels.Filter | None:
     if not filters:
         return None
-    conditions = [
-        qmodels.FieldCondition(
-            key=f"metadata.{field}",
-            match=qmodels.MatchValue(value=value),
-        )
-        for field, value in filters.items()
-        if value is not None
-    ]
+    conditions: list[qmodels.FieldCondition] = []
+    for field, value in filters.items():
+        if value is None:
+            continue
+        key = f"metadata.{field}"
+        if field == "filenames" and isinstance(value, list):
+            names = [x for x in value if isinstance(x, str) and x]
+            if names:
+                conditions.append(
+                    qmodels.FieldCondition(
+                        key="metadata.filename", match=qmodels.MatchAny(any=names)
+                    )
+                )
+            continue
+        if isinstance(value, (str, int)):
+            conditions.append(
+                qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value))
+            )
     if not conditions:
         return None
     return qmodels.Filter(must=conditions)
@@ -36,7 +46,7 @@ def _metadata_filter(filters: dict[str, str | int] | None) -> qmodels.Filter | N
 def retrieve(
     query: str,
     k: int | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
     store = get_vector_store(collection_name=collection_name)
@@ -56,7 +66,7 @@ def retrieve(
 
 
 def fetch_all_chunks(
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
     """Scroll every chunk matching the filter, ordered by filename → page → index."""
@@ -188,7 +198,7 @@ def invoke_llm(prompt: str, provider: str | None = None) -> str:
 def answer(
     question: str,
     k: int | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> RagAnswer:
     chunks = retrieve(question, k=k, filters=filters, collection_name=collection_name)

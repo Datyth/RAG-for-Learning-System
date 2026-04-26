@@ -12,12 +12,10 @@ from src.config import settings
 
 _SCROLL_PAGE_SIZE = 256
 
-INDEXED_PAYLOAD_FIELDS: dict[str, qmodels.PayloadSchemaType] = {
+INDEXED_PAYLOAD_FIELDS = {
     "metadata.document_id": qmodels.PayloadSchemaType.KEYWORD,
     "metadata.filename": qmodels.PayloadSchemaType.KEYWORD,
-    "metadata.source": qmodels.PayloadSchemaType.KEYWORD,
     "metadata.page": qmodels.PayloadSchemaType.INTEGER,
-    "metadata.section": qmodels.PayloadSchemaType.KEYWORD,
 }
 
 
@@ -113,4 +111,41 @@ def get_vector_store(collection_name: str | None = None) -> QdrantVectorStore:
         client=get_client(),
         collection_name=collection_name or settings.qdrant_collection,
         embedding=get_embeddings(),
+    )
+
+
+def list_documents() -> list[dict[str, object]]:
+    """List indexed documents with filename, document_id, pages, and chunk counts.
+
+    Returns one entry per filename matching the API `DocumentInfo` shape.
+    """
+    pages_map: dict[str, set[int]] = {}
+    doc_id_map: dict[str, str] = {}
+    count_map: dict[str, int] = {}
+
+    for batch in scroll_all(settings.qdrant_collection, with_payload=["metadata"]):
+        for point in batch:
+            meta = (point.payload or {}).get("metadata") or {}
+            filename = meta.get("filename")
+            document_id = meta.get("document_id")
+            pg = meta.get("page")
+            if not filename or not document_id or not isinstance(pg, int):
+                continue
+            fn = str(filename)
+            doc_id_map.setdefault(fn, str(document_id))
+            pages_map.setdefault(fn, set()).add(pg)
+            count_map[fn] = count_map.get(fn, 0) + 1
+
+    return sorted(
+        [
+            {
+                "filename": fn,
+                "document_id": doc_id_map[fn],
+                "pages": sorted(pages_map[fn]),
+                "page_count": len(pages_map[fn]),
+                "chunk_count": count_map[fn],
+            }
+            for fn in doc_id_map
+        ],
+        key=lambda d: str(d["filename"]),
     )

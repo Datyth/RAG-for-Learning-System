@@ -18,20 +18,19 @@ def prepare_evaluation_dataset(
     test_cases: list[dict[str, str]],
     answer_fn: Callable[[str], RagAnswer] = get_rag_answer,
 ) -> Dataset:
-    """Build a HuggingFace Dataset by running RAG on each test case."""
     data: dict[str, list] = {
-        "question": [],
-        "answer": [],
-        "contexts": [],
-        "ground_truth": [],
+        "user_input": [],          
+        "response": [],            
+        "retrieved_contexts": [], 
+        "reference": [],           
     }
 
     for case in test_cases:
         rag_response = answer_fn(case["question"])
-        data["question"].append(case["question"])
-        data["answer"].append(rag_response.answer)
-        data["contexts"].append([chunk.text for chunk in rag_response.chunks])
-        data["ground_truth"].append(case["ground_truth"])
+        data["user_input"].append(case["question"])
+        data["response"].append(rag_response.answer)
+        data["retrieved_contexts"].append([chunk.text for chunk in rag_response.chunks])
+        data["reference"].append(case["ground_truth"])
 
     return Dataset.from_dict(data)
 
@@ -60,24 +59,18 @@ def run_evaluation(
 
 
 if __name__ == "__main__":
-    test_cases = [
-        {
-            "question": "Fine tuning là gì?",
-            "ground_truth": (
-                "Kĩ thuật điều chỉnh một mô hình đã được huấn luyện trước đó "
-                "trên một tập dữ liệu nhỏ hơn và cụ thể hơn để cải thiện hiệu "
-                "suất của nó trên một nhiệm vụ cụ thể."
-            ),
-        },
-        {
-            "question": "Pretraining là gì?",
-            "ground_truth": (
-                "Quá trình huấn luyện ban đầu của một mô hình học máy trên một "
-                "tập dữ liệu lớn và đa dạng trước khi tiến hành huấn luyện cụ "
-                "thể hơn cho một nhiệm vụ nhất định."
-            ),
-        },
-    ]
+    test_path = "/home/datpt/AIO/STA/Module11/RAG-for-Learning-System/src/evaluation/benchmark_rag.csv"
+    
+    dataset = Dataset.from_csv(test_path)
+    
+    if "ground truth" in dataset.column_names:
+        dataset = dataset.rename_column("ground truth", "ground_truth")
+    
+    test_cases = list(dataset)
 
     evaluation_results = run_evaluation(test_cases, llm_provider="vllm")
     print(evaluation_results)
+    
+    # Optional: Xuất kết quả ra file csv nếu muốn
+    # df = evaluation_results.to_pandas()
+    # df.to_csv("evaluation_report.csv", index=False)

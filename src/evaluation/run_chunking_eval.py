@@ -97,15 +97,11 @@ def _evaluate_strategy(strategy: ChunkingStrategy, output_dir: Path, test_cases:
     }
 
     try:
+
         def answer_fn(q: str):
             return answer(q, collection_name=collection_name)
 
-        result = run_evaluation(test_cases, answer_fn=answer_fn)
-        
-        df_result = result.to_pandas()
-        summary_scores = df_result.mean(numeric_only=True).to_dict()
-        
-        strategy_out["summary_metrics"] = summary_scores
+        result = run_evaluation(test_cases, answer_fn=answer_fn, llm_provider="vllm")
         strategy_out["ragas_result"] = _safe_serialize_result(result)
         
     except Exception as exc:

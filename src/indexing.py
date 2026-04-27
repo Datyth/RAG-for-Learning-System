@@ -124,7 +124,8 @@ def ingest(
 
     ensure_collection(recreate=recreate, collection_name=collection_name)
     chunks = build_chunks(
-        pdfs, chunker=chunker,
+        pdfs,
+        chunker=chunker,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
@@ -136,3 +137,32 @@ def ingest(
     count = index_chunks(chunks, collection_name=collection_name)
     logger.info("Ingested {} chunks from {} PDF(s)", count, len(pdfs))
     return count
+
+
+def save_and_ingest_pdf(file_bytes: bytes, filename: str) -> dict[str, object]:
+    """Save an uploaded PDF to `data_dir` and ingest it into Qdrant.
+
+    Args: file_bytes, filename. Returns: {"filename", "chunks_indexed"}. Raises: ValueError.
+    """
+    if not filename:
+        raise ValueError("Filename is required.")
+    if not filename.lower().endswith(".pdf"):
+        raise ValueError("Only PDF files are accepted.")
+    if not file_bytes:
+        raise ValueError("Uploaded file is empty.")
+
+    safe_name = Path(filename).name
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    dest = settings.data_dir / safe_name
+    dest.write_bytes(file_bytes)
+    logger.info("Saved uploaded PDF: {}", dest)
+
+    ensure_collection(recreate=False)
+    chunks = build_chunks([dest])
+    if not chunks:
+        logger.warning("No chunks produced for uploaded file {}", safe_name)
+        return {"filename": safe_name, "chunks_indexed": 0}
+
+    count = index_chunks(chunks)
+    logger.info("Indexed {} chunks from {}", count, safe_name)
+    return {"filename": safe_name, "chunks_indexed": count}

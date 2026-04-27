@@ -3,6 +3,7 @@
 import ragas
 from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 
+
 def get_ragas_metrics(llm, embeddings) -> list[ragas.metrics.Metric]:
     """Return Ragas metrics wired to the project's LLM and embeddings."""
     faithfulness.llm = llm

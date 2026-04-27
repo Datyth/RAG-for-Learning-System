@@ -1,5 +1,6 @@
 """Embeddings, Qdrant client, collection setup, and vector store."""
 
+from collections.abc import Iterator
 from functools import lru_cache
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -9,12 +10,12 @@ from qdrant_client.http import models as qmodels
 
 from src.config import settings
 
-INDEXED_PAYLOAD_FIELDS: dict[str, qmodels.PayloadSchemaType] = {
+_SCROLL_PAGE_SIZE = 256
+
+INDEXED_PAYLOAD_FIELDS = {
     "metadata.document_id": qmodels.PayloadSchemaType.KEYWORD,
     "metadata.filename": qmodels.PayloadSchemaType.KEYWORD,
-    "metadata.source": qmodels.PayloadSchemaType.KEYWORD,
     "metadata.page": qmodels.PayloadSchemaType.INTEGER,
-    "metadata.section": qmodels.PayloadSchemaType.KEYWORD,
 }
 
 
@@ -82,9 +83,69 @@ def ensure_collection(recreate: bool = False, collection_name: str | None = None
             )
 
 
+def scroll_all(
+    collection_name: str,
+    scroll_filter: qmodels.Filter | None = None,
+    with_payload: bool | list[str] = True,
+) -> Iterator[list]:
+    """Yield pages of Qdrant points (no vectors) until the collection is exhausted."""
+    client = get_client()
+    offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=scroll_filter,
+            limit=_SCROLL_PAGE_SIZE,
+            offset=offset,
+            with_payload=with_payload,
+            with_vectors=False,
+        )
+        yield points
+        if next_offset is None:
+            break
+        offset = next_offset
+
+
 def get_vector_store(collection_name: str | None = None) -> QdrantVectorStore:
     return QdrantVectorStore(
         client=get_client(),
         collection_name=collection_name or settings.qdrant_collection,
         embedding=get_embeddings(),
+    )
+
+
+def list_documents() -> list[dict[str, object]]:
+    """List indexed documents with filename, document_id, pages, and chunk counts.
+
+    Returns one entry per filename matching the API `DocumentInfo` shape.
+    """
+    pages_map: dict[str, set[int]] = {}
+    doc_id_map: dict[str, str] = {}
+    count_map: dict[str, int] = {}
+
+    for batch in scroll_all(settings.qdrant_collection, with_payload=["metadata"]):
+        for point in batch:
+            meta = (point.payload or {}).get("metadata") or {}
+            filename = meta.get("filename")
+            document_id = meta.get("document_id")
+            pg = meta.get("page")
+            if not filename or not document_id or not isinstance(pg, int):
+                continue
+            fn = str(filename)
+            doc_id_map.setdefault(fn, str(document_id))
+            pages_map.setdefault(fn, set()).add(pg)
+            count_map[fn] = count_map.get(fn, 0) + 1
+
+    return sorted(
+        [
+            {
+                "filename": fn,
+                "document_id": doc_id_map[fn],
+                "pages": sorted(pages_map[fn]),
+                "page_count": len(pages_map[fn]),
+                "chunk_count": count_map[fn],
+            }
+            for fn in doc_id_map
+        ],
+        key=lambda d: str(d["filename"]),
     )

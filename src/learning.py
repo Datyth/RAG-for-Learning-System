@@ -43,60 +43,44 @@ def _strip_code_fences(text: str) -> str:
     return t.strip()
 
 
-def _extract_json(text: str) -> str:
-    """Extract the first top-level JSON object or array from model output."""
+def _parse_json(text: str) -> dict | list:
+    """Parse the first JSON object/array found in model output."""
     cleaned = _strip_code_fences(text)
+    decoder = json.JSONDecoder()
+
+    # Fast path: whole output is valid JSON.
     try:
-        json.loads(cleaned)
-        return cleaned
+        obj = json.loads(cleaned)
+        if isinstance(obj, (dict, list)):
+            return obj
     except json.JSONDecodeError:
         pass
 
-    for open_c, close_c in (("{", "}"), ("[", "]")):
-        start = cleaned.find(open_c)
-        if start == -1:
+    # Common path: model wraps JSON with prose; decode from first plausible start.
+    starts = sorted(i for i in (cleaned.find("{"), cleaned.find("[")) if i != -1)
+    if not starts:
+        raise GenerationError("No JSON object found in model output.")
+
+    for start in starts:
+        try:
+            obj, _end = decoder.raw_decode(cleaned, idx=start)
+        except json.JSONDecodeError:
             continue
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(cleaned)):
-            ch = cleaned[i]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-            elif ch == open_c:
-                depth += 1
-            elif ch == close_c:
-                depth -= 1
-                if depth == 0:
-                    return cleaned[start : i + 1]
-    raise GenerationError("No JSON object found in model output.")
+        if isinstance(obj, (dict, list)):
+            return obj
 
-
-def _parse_json(text: str) -> dict | list:
-    blob = _extract_json(text)
-    try:
-        return json.loads(blob)
-    except json.JSONDecodeError as e:
-        raise GenerationError(f"Invalid JSON from model: {e}") from e
+    raise GenerationError("Invalid JSON from model output.")
 
 
 def _resolve_target(
     document: str | None,
     query: str | None,
-    filters: dict[str, str | int] | None,
+    filters: dict[str, object] | None,
     k: int | None,
     retrieval_k: int,
 ) -> tuple[list[RetrievedChunk], str, str | None]:
     """Resolve input options into (chunks, scope, target_label)."""
-    effective_filters: dict[str, str | int] = dict(filters or {})
+    effective_filters: dict[str, object] = dict(filters or {})
     if document:
         effective_filters["filename"] = document
 
@@ -128,11 +112,12 @@ def _validate_items(
     label: str,
     valid_markers: set[str],
 ) -> list:
-    if not isinstance(payload, dict) or key not in payload:
-        raise GenerationError(f"Expected JSON object with '{key}' for {label}.")
-    raw_items = payload[key]
+    if not isinstance(payload, dict):
+        raise GenerationError(f"Expected JSON object for {label}.")
+    raw_items = payload.get(key)
     if not isinstance(raw_items, list):
-        raise GenerationError(f"{label.capitalize()} '{key}' must be a list.")
+        raise GenerationError(f"Expected '{key}' to be a list for {label}.")
+
     items: list = []
     seen: set[str] = set()
     for raw in raw_items:
@@ -143,12 +128,13 @@ def _validate_items(
         except ValidationError as e:
             logger.warning("Dropping invalid {}: {}", label, e)
             continue
-        norm = getattr(item, dedup_field).strip().lower()
-        if norm in seen:
+        norm = str(getattr(item, dedup_field, "")).strip().lower()
+        if not norm or norm in seen:
             continue
         seen.add(norm)
-        item.source_markers = [m for m in item.source_markers if m in valid_markers]
-        items.append(item)
+        markers = [m for m in item.source_markers if m in valid_markers]
+        items.append(item.model_copy(update={"source_markers": markers}))
+
     if not items:
         raise GenerationError(f"No valid {label} produced.")
     return items
@@ -169,7 +155,7 @@ def _validate_summary_payload(payload: object) -> tuple[str, list[str]]:
 def summarize(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     k: int | None = None,
 ) -> Summary:
     """Grounded summary; uses map-reduce when chunk count exceeds batch size."""
@@ -212,14 +198,10 @@ def summarize(
     )
 
 
-def _validate_quiz_items(payload: object, valid_markers: set[str]) -> list[QuizItem]:
-    return _validate_items(payload, "items", QuizItem, "question", "quiz items", valid_markers)
-
-
 def generate_quiz(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     count: int | None = None,
     k: int | None = None,
 ) -> QuizSet:
@@ -239,7 +221,7 @@ def generate_quiz(
 
     prompt = render_prompt(QUIZ_TEMPLATE, chunks=chunks, count=n)
     payload = _parse_json(invoke_llm(prompt))
-    items = _validate_quiz_items(payload, valid_markers)
+    items = _validate_items(payload, "items", QuizItem, "question", "quiz items", valid_markers)
 
     return QuizSet(
         scope=scope,
@@ -249,14 +231,10 @@ def generate_quiz(
     )
 
 
-def _validate_flashcards(payload: object, valid_markers: set[str]) -> list[Flashcard]:
-    return _validate_items(payload, "cards", Flashcard, "front", "flashcards", valid_markers)
-
-
 def generate_flashcards(
     document: str | None = None,
     query: str | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     count: int | None = None,
     k: int | None = None,
 ) -> FlashcardSet:
@@ -276,7 +254,7 @@ def generate_flashcards(
 
     prompt = render_prompt(FLASHCARDS_TEMPLATE, chunks=chunks, count=n)
     payload = _parse_json(invoke_llm(prompt))
-    cards = _validate_flashcards(payload, valid_markers)
+    cards = _validate_items(payload, "cards", Flashcard, "front", "flashcards", valid_markers)
 
     return FlashcardSet(
         scope=scope,

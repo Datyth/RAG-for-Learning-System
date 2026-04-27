@@ -6,30 +6,38 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 from qdrant_client.http import models as qmodels
 
 from src.config import settings
 from src.schemas import ChunkMetadata, Citation, RagAnswer, RetrievedChunk
-from src.store import get_client, get_vector_store
-
-from langchain_openai import ChatOpenAI
+from src.store import get_vector_store, scroll_all
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 ANSWER_TEMPLATE = "answer.jinja2"
-SCROLL_PAGE_SIZE = 256
 
 
-def _metadata_filter(filters: dict[str, str | int] | None) -> qmodels.Filter | None:
+def _metadata_filter(filters: dict[str, object] | None) -> qmodels.Filter | None:
     if not filters:
         return None
-    conditions = [
-        qmodels.FieldCondition(
-            key=f"metadata.{field}",
-            match=qmodels.MatchValue(value=value),
-        )
-        for field, value in filters.items()
-        if value is not None
-    ]
+    conditions: list[qmodels.FieldCondition] = []
+    for field, value in filters.items():
+        if value is None:
+            continue
+        key = f"metadata.{field}"
+        if field == "filenames" and isinstance(value, list):
+            names = [x for x in value if isinstance(x, str) and x]
+            if names:
+                conditions.append(
+                    qmodels.FieldCondition(
+                        key="metadata.filename", match=qmodels.MatchAny(any=names)
+                    )
+                )
+            continue
+        if isinstance(value, (str, int)):
+            conditions.append(
+                qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value))
+            )
     if not conditions:
         return None
     return qmodels.Filter(must=conditions)
@@ -38,7 +46,7 @@ def _metadata_filter(filters: dict[str, str | int] | None) -> qmodels.Filter | N
 def retrieve(
     query: str,
     k: int | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
     store = get_vector_store(collection_name=collection_name)
@@ -58,41 +66,20 @@ def retrieve(
 
 
 def fetch_all_chunks(
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
-    """Scroll every chunk in the collection matching the filter, ordered by page."""
-    client = get_client()
-    effective_collection = collection_name or settings.qdrant_collection
-    q_filter = _metadata_filter(filters)
+    """Scroll every chunk matching the filter, ordered by filename → page → index."""
+    name = collection_name or settings.qdrant_collection
     results: list[RetrievedChunk] = []
-    offset = None
-    while True:
-        points, next_offset = client.scroll(
-            collection_name=effective_collection,
-            scroll_filter=q_filter,
-            limit=SCROLL_PAGE_SIZE,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for point in points:
+    for page in scroll_all(name, scroll_filter=_metadata_filter(filters)):
+        for point in page:
             payload = point.payload or {}
             meta = payload.get("metadata") or {}
             text = payload.get("page_content") or ""
             if not meta or not text:
                 continue
-            results.append(
-                RetrievedChunk(
-                    text=text,
-                    score=0.0,
-                    metadata=ChunkMetadata(**meta),
-                )
-            )
-        if next_offset is None:
-            break
-        offset = next_offset
-
+            results.append(RetrievedChunk(text=text, score=0.0, metadata=ChunkMetadata(**meta)))
     results.sort(
         key=lambda r: (
             r.metadata.filename,
@@ -189,10 +176,10 @@ def _build_vllm() -> BaseChatModel:
     )
 
 
-@lru_cache(maxsize=1)
-def get_llm() -> BaseChatModel:
-    """Return the cached LLM instance based on the configured provider."""
-    provider = settings.llm_provider
+@lru_cache(maxsize=4)
+def get_llm(provider: str | None = None) -> BaseChatModel:
+    """Return a cached LLM instance (optionally overriding provider)."""
+    provider = provider or settings.llm_provider
     if provider == "hf_local":
         return _build_hf_local()
     if provider == "gemini":
@@ -202,15 +189,16 @@ def get_llm() -> BaseChatModel:
     raise ValueError(f"Unknown llm_provider '{provider}'. Expected 'hf_local' | 'gemini' | 'vllm'.")
 
 
-def invoke_llm(prompt: str) -> str:
-    response = get_llm().invoke([HumanMessage(content=prompt)])
+def invoke_llm(prompt: str, provider: str | None = None) -> str:
+    """Invoke an LLM (optionally overriding provider) and return text."""
+    response = get_llm(provider=provider).invoke([HumanMessage(content=prompt)])
     return response.content if isinstance(response.content, str) else str(response.content)
 
 
 def answer(
     question: str,
     k: int | None = None,
-    filters: dict[str, str | int] | None = None,
+    filters: dict[str, object] | None = None,
     collection_name: str | None = None,
 ) -> RagAnswer:
     chunks = retrieve(question, k=k, filters=filters, collection_name=collection_name)

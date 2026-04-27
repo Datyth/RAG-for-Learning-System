@@ -7,7 +7,6 @@ import typer
 from loguru import logger
 from pydantic import BaseModel
 
-from src import services
 from src.export import (
     model_to_text,
     to_json,
@@ -15,8 +14,14 @@ from src.export import (
     write_markdown,
     write_text,
 )
-from src.learning import GenerationError
-from src.rag import retrieve
+from src.indexing import ingest as ingest_data_dir
+from src.learning import (
+    GenerationError,
+    generate_flashcards,
+    generate_quiz,
+    summarize as summarize_learning,
+)
+from src.rag import answer, retrieve
 from src.schemas import RetrievedChunk
 from src.store import close_client
 
@@ -37,12 +42,12 @@ def _print_section(title: str) -> None:
 def _print_answer(text: str) -> None:
     _print_section("Answer")
     typer.echo(text.strip())
-    typer.echo()
 
 
 def _print_sources(chunks: list[RetrievedChunk]) -> None:
     if not chunks:
         return
+    typer.echo()
     _print_section("Sources")
     for i, chunk in enumerate(chunks, start=1):
         meta = chunk.metadata
@@ -93,7 +98,8 @@ def ingest(
     recreate: bool = typer.Option(False, "--recreate", help="Drop and recreate the collection."),
 ) -> None:
     """Ingest every PDF under ./data into Qdrant."""
-    services.ingest_data_dir(recreate=recreate)
+    count = ingest_data_dir(recreate=recreate)
+    typer.echo(f"Done. {count} chunks indexed.")
 
 
 @app.command()
@@ -108,7 +114,7 @@ def ask(
     ),
 ) -> None:
     """Answer a question using retrieved context only."""
-    result = services.ask(question, k=k, filters=_parse_filters(filters))
+    result = answer(question, k=k, filters=_parse_filters(filters))
     _print_answer(result.answer)
     _print_sources(result.chunks)
 
@@ -144,6 +150,8 @@ def debug_retrieval(
             + (f" | section={c.metadata.section}" if c.metadata.section else "")
         )
         preview = c.text.strip().replace("\n", " ")
+        if len(preview) > 120:
+            preview = preview[:120] + "…"
         typer.echo(f"    {preview}\n")
 
 
@@ -167,7 +175,7 @@ def summarize(
     """Generate a grounded study summary of a document, filter, or topic."""
     fmt = _validate_format(fmt)
     try:
-        result = services.summarize(
+        result = summarize_learning(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -195,7 +203,7 @@ def quiz(
     """Generate a grounded multiple-choice quiz set."""
     fmt = _validate_format(fmt)
     try:
-        result = services.quiz(
+        result = generate_quiz(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -224,7 +232,7 @@ def flashcards(
     """Generate a grounded flashcard set for study and review."""
     fmt = _validate_format(fmt)
     try:
-        result = services.flashcards(
+        result = generate_flashcards(
             document=document,
             query=query,
             filters=_parse_filters(filters),
@@ -240,7 +248,7 @@ def flashcards(
 
 def main() -> None:
     logger.remove()
-    logger.add(lambda m: typer.echo(m, err=True), level="INFO")
+    logger.add(lambda m: typer.echo(m, err=True), level="INFO", colorize=True)
     try:
         app()
     finally:

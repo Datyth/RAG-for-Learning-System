@@ -2,8 +2,9 @@
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
+from src.filters import MetadataFilter, filters_to_dict
 from src.indexing import save_and_ingest_pdf
 from src.learning import (
     GenerationError,
@@ -14,27 +15,6 @@ from src.learning import (
 from src.rag import answer
 from src.schemas import FlashcardSet, QuizSet, RagAnswer, Summary
 from src.store import list_documents
-
-
-class MetadataFilter(BaseModel):
-    """Retrieval filter applied against indexed chunk metadata."""
-
-    filename: str | None = None
-    filenames: list[str] | None = None
-    page: int | None = None
-    section: str | None = None
-    document_id: str | None = None
-
-    @model_validator(mode="after")
-    def _normalize(self) -> "MetadataFilter":
-        names = [x for x in (self.filenames or []) if x]
-        if not names:
-            self.filenames = None
-        elif len(names) == 1:
-            self.filename, self.filenames = names[0], None
-        else:
-            self.filename, self.filenames, self.page = None, names, None
-        return self
 
 
 class AskRequest(BaseModel):
@@ -73,12 +53,6 @@ class DocumentInfo(BaseModel):
 class UploadResponse(BaseModel):
     filename: str
     chunks_indexed: int
-
-
-def _filters_to_dict(f: MetadataFilter | None) -> dict[str, object] | None:
-    if f is None:
-        return None
-    return f.model_dump(exclude_none=True) or None
 
 
 app = FastAPI(
@@ -121,7 +95,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=RagAnswer)
 def ask(req: AskRequest) -> RagAnswer:
     """Grounded Q&A with inline source citations."""
-    return answer(req.question, k=req.k, filters=_filters_to_dict(req.filters))
+    return answer(req.question, k=req.k, filters=filters_to_dict(req.filters))
 
 
 @app.post("/summarize", response_model=Summary)
@@ -131,7 +105,7 @@ def summarize(req: SummarizeRequest) -> Summary:
         return summarize_learning(
             document=req.document,
             query=req.query,
-            filters=_filters_to_dict(req.filters),
+            filters=filters_to_dict(req.filters),
             k=req.k,
         )
     except GenerationError as exc:
@@ -145,7 +119,7 @@ def quiz(req: QuizRequest) -> QuizSet:
         return generate_quiz(
             document=req.document,
             query=req.query,
-            filters=_filters_to_dict(req.filters),
+            filters=filters_to_dict(req.filters),
             count=req.count,
             k=req.k,
         )
@@ -160,7 +134,7 @@ def flashcards(req: FlashcardsRequest) -> FlashcardSet:
         return generate_flashcards(
             document=req.document,
             query=req.query,
-            filters=_filters_to_dict(req.filters),
+            filters=filters_to_dict(req.filters),
             count=req.count,
             k=req.k,
         )

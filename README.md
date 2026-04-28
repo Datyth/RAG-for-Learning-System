@@ -17,6 +17,7 @@
 - [CLI Reference](#cli-reference)
 - [HTTP API](#http-api)
 - [Streamlit UI](#streamlit-ui)
+- [Evaluation](#evaluation)
 - [LLM Providers](#llm-providers)
 - [Project Structure](#project-structure)
 
@@ -27,7 +28,7 @@
 - Document summarization — single-shot or staged map/reduce for long inputs
 - Multiple-choice quiz generation with answers, explanations, and difficulty tags
 - Flashcard generation for spaced repetition
-- Metadata filtering by filename, page, section, or any indexed field
+- Metadata filtering by filename(s), page, section, or document ID
 - Vietnamese output across all LLM responses
 - JSON and Markdown export for all learning outputs
 - Three LLM backends: local HuggingFace (default), vLLM, and Google Gemini
@@ -55,13 +56,16 @@ flowchart LR
 ```mermaid
 flowchart TD
     Input(["Question / Document"])
-    RAG["rag.py — retrieve · render_prompt · invoke_llm"]
+    RAG["rag.py — retrieve · render_prompt · answer"]
+    LLM["llm.py — provider setup · invoke_llm"]
     LRN["learning.py — summarize · quiz · flashcards"]
     API["FastAPI :8000"]
     CLI["CLI — Typer"]
     UI["Streamlit UI — httpx"]
 
     Input --> RAG & LRN
+    RAG --> LLM
+    LRN --> LLM
     RAG --> API & CLI
     LRN --> API & CLI
     API --> UI
@@ -74,13 +78,16 @@ flowchart TD
 
 | File | Responsibility |
 |------|---------------|
-| `src/config.py` | Frozen `Settings` dataclass — all runtime parameters |
+| `src/config.py` | Pydantic `BaseSettings` for runtime parameters |
 | `src/schemas.py` | Pydantic models for all inputs and outputs |
+| `src/filters.py` | Shared metadata filter normalization for API/UI/RAG |
 | `src/store.py` | `@lru_cache` singletons: Qdrant client, embeddings, vector store |
-| `src/rag.py` | Retrieval, prompt rendering, LLM invocation, citation parsing |
+| `src/rag.py` | Retrieval, prompt rendering, grounded answer assembly |
+| `src/llm.py` | LLM provider construction and invocation |
 | `src/learning.py` | Summarize (map/reduce), quiz, flashcard generation |
-| `src/export.py` | JSON and Markdown serialization |
+| `src/export.py` | Single export entrypoint for JSON / Markdown output |
 | `src/interfaces/` | CLI (Typer), API (FastAPI), UI (Streamlit via HTTP) |
+| `src/evaluation/` | Offline Ragas evaluation and chunking experiments |
 | `src/prompts/` | Jinja2 prompt templates |
 
 </details>
@@ -161,6 +168,7 @@ All runtime parameters live in `src/config.py`. The `.env` file is for secrets o
 | `generation_retrieval_k` | `16` | Chunks retrieved for quiz/flashcards |
 | `quiz_default_count` | `8` | Default number of quiz items |
 | `flashcards_default_count` | `15` | Default number of flashcards |
+| `api_url` | `http://localhost:8000` | Backend URL used by the Streamlit UI |
 
 </details>
 
@@ -326,6 +334,28 @@ Features:
 </details>
 
 
+## Evaluation
+
+<details>
+<summary>Offline chunking evaluation with Ragas</summary>
+
+The repo includes a benchmark runner at `src/evaluation/run_chunking_eval.py`. It:
+
+- loads test cases from `src/evaluation/benchmark_rag.csv`
+- re-ingests the corpus into a separate Qdrant collection per chunking strategy
+- runs Ragas evaluation with `llm_provider="vllm"`
+- writes per-strategy JSON artifacts and a comparison CSV under `artifacts/eval/chunking/`
+
+```bash
+uv run python src/evaluation/run_chunking_eval.py
+uv run python src/evaluation/run_chunking_eval.py --test-path src/evaluation/benchmark_rag.csv
+```
+
+Make sure a vLLM server is running first if you keep the default evaluation provider.
+
+</details>
+
+
 ## LLM Providers
 
 | Provider | `llm_provider` | Requires |
@@ -377,15 +407,17 @@ The model name is controlled by `gemini_model` in `src/config.py`.
 
 ```
 src/
-├── config.py           # Frozen Settings dataclass — all runtime params
+├── config.py           # BaseSettings runtime configuration
 ├── schemas.py          # Pydantic models for all outputs
+├── filters.py          # Shared metadata filter normalization
 ├── store.py            # Embeddings singleton + Qdrant client
 ├── indexing.py         # PDF loading, chunking, ingestion
-├── rag.py              # Retrieval, prompting, LLM abstraction
+├── rag.py              # Retrieval, prompting, grounded answers
+├── llm.py              # LLM provider setup and invocation
 ├── learning.py         # Summarize, quiz, flashcard generation
-├── export.py           # JSON / Markdown serialization
+├── export.py           # JSON / Markdown export helper
 ├── prompts/            # Jinja2 templates — edit to change LLM behaviour
-├── evaluation/         # Offline Ragas evaluation (evaluator, metrics)
+├── evaluation/         # Offline Ragas evaluation (runner, metrics, chunking)
 └── interfaces/
     ├── api.py          # FastAPI app — thin HTTP layer
     ├── cli.py          # Typer CLI — 6 commands

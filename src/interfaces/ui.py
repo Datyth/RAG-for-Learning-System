@@ -11,7 +11,6 @@ All user-facing text is in Vietnamese.
 """
 
 import html
-from collections.abc import Callable
 from typing import TypeVar
 
 import httpx
@@ -19,8 +18,9 @@ import streamlit as st
 from pydantic import BaseModel
 
 from src.config import settings
-from src.export import flashcards_to_markdown, quiz_to_markdown, summary_to_markdown
+from src.export import export
 from src.interfaces.styles import GLOBAL_CSS
+from src.filters import MetadataFilter, filters_to_dict
 from src.schemas import Citation, FlashcardSet, QuizSet, RagAnswer, RetrievedChunk, Summary
 
 _API = settings.api_url
@@ -52,12 +52,12 @@ def _post_model(path: str, payload: dict, model: type[T], err: str) -> T | None:
 
 
 def _filters_json(filenames: list[str], page: int | None) -> dict | None:
-    f: dict = {}
+    payload: dict[str, object] = {}
     if filenames:
-        f["filenames"] = filenames  # API model_validator normalizes single-item to filename
+        payload["filenames"] = filenames
     if page is not None:
-        f["page"] = page
-    return f or None
+        payload["page"] = page
+    return filters_to_dict(MetadataFilter.model_validate(payload))
 
 
 def _init_state() -> None:
@@ -65,13 +65,11 @@ def _init_state() -> None:
         st.session_state.setdefault(key, default)
 
 
-def _downloads(res: BaseModel, stem: str, md_fn: Callable[[object], str]) -> None:
+def _downloads(res: BaseModel, stem: str) -> None:
     st.divider()
     c1, c2 = st.columns(2)
-    c1.download_button(
-        "Tải JSON", res.model_dump_json(indent=2), f"{stem}.json", "application/json"
-    )
-    c2.download_button("Tải Markdown", md_fn(res), f"{stem}.md", "text/markdown")
+    c1.download_button("Tải JSON", export(res, fmt="json"), f"{stem}.json", "application/json")
+    c2.download_button("Tải Markdown", export(res, fmt="md"), f"{stem}.md", "text/markdown")
 
 
 def _render_citations(citations: list[Citation]) -> None:
@@ -264,7 +262,7 @@ def _tab_summary(filenames: list[str], page: int | None) -> None:
         )
 
     _render_citations(res.citations)
-    _downloads(res, "summary", summary_to_markdown)
+    _downloads(res, "summary")
 
 
 def _clear_quiz_state() -> None:
@@ -371,7 +369,7 @@ def _tab_quiz(filenames: list[str], page: int | None) -> None:
         st.rerun()
 
     _render_citations(res.citations)
-    _downloads(res, "quiz", quiz_to_markdown)
+    _downloads(res, "quiz")
 
 
 def _fc_card_html(face: str, side: str, topic: str | None, hint: str | None, flipped: bool) -> str:
@@ -461,7 +459,7 @@ def _tab_flashcards(filenames: list[str], page: int | None) -> None:
             st.rerun()
 
     _render_citations(res.citations)
-    _downloads(res, "flashcards", flashcards_to_markdown)
+    _downloads(res, "flashcards")
 
 
 def run() -> None:

@@ -1,10 +1,15 @@
-"""Export learning outputs to JSON and Markdown."""
+"""Export learning outputs to JSON or Markdown."""
+
+from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
 from src.schemas import Citation, FlashcardSet, QuizSet, Summary
+
+ExportFormat = Literal["text", "md", "json"]
 
 
 def _citation_line(c: Citation) -> str:
@@ -24,123 +29,87 @@ def _citations_block(citations: list[Citation]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_text(path: Path, text: str) -> Path:
-    """Write `text` to `path`, creating parent directories as needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
-def to_json(model: BaseModel) -> str:
-    """Serialize a learning output model to JSON."""
-    return model.model_dump_json(indent=2)
-
-
-def write_json(model: BaseModel, path: Path) -> Path:
-    """Write a learning output model as JSON to `path`."""
-    return write_text(path, to_json(model) + "\n")
-
-
-def summary_to_markdown(summary: Summary) -> str:
-    title = "# Summary"
-    if summary.target:
-        title += f": {summary.target}"
-
-    lines = [title, ""]
-    lines.append(f"_Scope: {summary.scope}_")
-    lines.append("")
-
-    if summary.summary:
-        lines.append(summary.summary.strip())
-        lines.append("")
-
-    if summary.key_points:
-        lines.append("## Key Points")
-        lines.append("")
-        lines.extend(f"- {kp}" for kp in summary.key_points)
-        lines.append("")
-
-    citations_md = _citations_block(summary.citations)
-    if citations_md:
-        lines.append(citations_md)
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def quiz_to_markdown(quiz: QuizSet) -> str:
-    title = "# Quiz"
-    if quiz.target:
-        title += f": {quiz.target}"
-
-    lines = [title, "", f"_Scope: {quiz.scope} | Items: {len(quiz.items)}_", ""]
-
-    for idx, item in enumerate(quiz.items, start=1):
-        meta_parts: list[str] = []
-        if item.topic:
-            meta_parts.append(f"topic: {item.topic}")
-        if item.difficulty:
-            meta_parts.append(f"difficulty: {item.difficulty}")
-        meta_suffix = f" _({' | '.join(meta_parts)})_" if meta_parts else ""
-
-        lines.append(f"## Q{idx}.{meta_suffix}")
-        lines.append("")
-        lines.append(item.question.strip())
-        lines.append("")
-        for opt_idx, option in enumerate(item.options):
-            letter = chr(ord("A") + opt_idx)
-            lines.append(f"- {letter}) {option}")
-        lines.append("")
-        lines.append(f"**Answer:** {chr(ord('A') + item.correct_index)}")
-        if item.explanation:
-            lines.append(f"**Explanation:** {item.explanation.strip()}")
-        if item.source_markers:
-            lines.append(f"**Sources:** {', '.join(item.source_markers)}")
-        lines.append("")
-
-    citations_md = _citations_block(quiz.citations)
-    if citations_md:
-        lines.append(citations_md)
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def flashcards_to_markdown(flashcards: FlashcardSet) -> str:
-    title = "# Flashcards"
-    if flashcards.target:
-        title += f": {flashcards.target}"
-
-    lines = [title, "", f"_Scope: {flashcards.scope} | Cards: {len(flashcards.cards)}_", ""]
-
-    for idx, card in enumerate(flashcards.cards, start=1):
-        topic = f" — {card.topic}" if card.topic else ""
-        lines.append(f"## Card {idx}{topic}")
-        lines.append("")
-        lines.append(f"**Front:** {card.front.strip()}")
-        lines.append(f"**Back:** {card.back.strip()}")
-        if card.hint:
-            lines.append(f"**Hint:** {card.hint.strip()}")
-        if card.source_markers:
-            lines.append(f"**Sources:** {', '.join(card.source_markers)}")
-        lines.append("")
-
-    citations_md = _citations_block(flashcards.citations)
-    if citations_md:
-        lines.append(citations_md)
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def model_to_text(model: BaseModel) -> str:
-    """Render a learning output model as Markdown text."""
+def _to_markdown(model: BaseModel) -> str:
     if isinstance(model, Summary):
-        return summary_to_markdown(model)
+        title = "# Summary" + (f": {model.target}" if model.target else "")
+        lines: list[str] = [title, "", f"_Scope: {model.scope}_", ""]
+        if model.summary:
+            lines.extend([model.summary.strip(), ""])
+        if model.key_points:
+            lines.extend(["## Key Points", "", *[f"- {kp}" for kp in model.key_points], ""])
+        c = _citations_block(model.citations)
+        if c:
+            lines.append(c)
+        return "\n".join(lines).rstrip() + "\n"
+
     if isinstance(model, QuizSet):
-        return quiz_to_markdown(model)
+        title = "# Quiz" + (f": {model.target}" if model.target else "")
+        lines = [title, "", f"_Scope: {model.scope} | Items: {len(model.items)}_", ""]
+        for idx, item in enumerate(model.items, start=1):
+            meta_parts: list[str] = []
+            if item.topic:
+                meta_parts.append(f"topic: {item.topic}")
+            if item.difficulty:
+                meta_parts.append(f"difficulty: {item.difficulty}")
+            meta_suffix = f" _({' | '.join(meta_parts)})_" if meta_parts else ""
+
+            lines.extend([f"## Q{idx}.{meta_suffix}", "", item.question.strip(), ""])
+            for opt_idx, option in enumerate(item.options):
+                lines.append(f"- {chr(ord('A') + opt_idx)}) {option}")
+            lines.append("")
+            lines.append(f"**Answer:** {chr(ord('A') + item.correct_index)}")
+            if item.explanation:
+                lines.append(f"**Explanation:** {item.explanation.strip()}")
+            if item.source_markers:
+                lines.append(f"**Sources:** {', '.join(item.source_markers)}")
+            lines.append("")
+
+        c = _citations_block(model.citations)
+        if c:
+            lines.append(c)
+        return "\n".join(lines).rstrip() + "\n"
+
     if isinstance(model, FlashcardSet):
-        return flashcards_to_markdown(model)
+        title = "# Flashcards" + (f": {model.target}" if model.target else "")
+        lines = [title, "", f"_Scope: {model.scope} | Cards: {len(model.cards)}_", ""]
+        for idx, card in enumerate(model.cards, start=1):
+            topic = f" — {card.topic}" if card.topic else ""
+            lines.extend([f"## Card {idx}{topic}", ""])
+            lines.append(f"**Front:** {card.front.strip()}")
+            lines.append(f"**Back:** {card.back.strip()}")
+            if card.hint:
+                lines.append(f"**Hint:** {card.hint.strip()}")
+            if card.source_markers:
+                lines.append(f"**Sources:** {', '.join(card.source_markers)}")
+            lines.append("")
+
+        c = _citations_block(model.citations)
+        if c:
+            lines.append(c)
+        return "\n".join(lines).rstrip() + "\n"
+
     raise TypeError(f"Unsupported model type: {type(model).__name__}")
 
 
-def write_markdown(model: BaseModel, path: Path) -> Path:
-    """Write a learning output model as Markdown to `path`."""
-    return write_text(path, model_to_text(model))
+def export(
+    model: BaseModel, *, fmt: ExportFormat = "text", output: Path | None = None
+) -> str | Path:
+    """Render model to a string, optionally writing it to disk.
+
+    Args: model, fmt, output (optional).
+    Returns: rendered string if output is None; otherwise the written path.
+    Raises: TypeError for unsupported model type; ValueError for unknown fmt.
+    """
+    if fmt == "json":
+        text = model.model_dump_json(indent=2) + "\n"
+    elif fmt in {"text", "md"}:
+        text = _to_markdown(model)
+    else:
+        raise ValueError(f"Unknown fmt '{fmt}'. Expected 'text' | 'md' | 'json'.")
+
+    if output is None:
+        return text
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8")
+    return output

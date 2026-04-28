@@ -1,27 +1,13 @@
 """Grounded learning features: summarization, quiz, and flashcard generation."""
 
 import json
-import re
-
 from loguru import logger
 from pydantic import ValidationError
 
 from src.config import settings
-from src.rag import (
-    fetch_all_chunks,
-    format_citations,
-    invoke_llm,
-    render_prompt,
-    retrieve,
-)
-from src.schemas import (
-    Flashcard,
-    FlashcardSet,
-    QuizItem,
-    QuizSet,
-    RetrievedChunk,
-    Summary,
-)
+from src.llm import invoke_llm
+from src.rag import fetch_all_chunks, format_citations, render_prompt, retrieve
+from src.schemas import Flashcard, FlashcardSet, QuizItem, QuizSet, RetrievedChunk, Summary
 
 SUMMARY_SINGLE_TEMPLATE = "summary_single.jinja2"
 SUMMARY_MAP_TEMPLATE = "summary_map.jinja2"
@@ -30,46 +16,21 @@ QUIZ_TEMPLATE = "quiz.jinja2"
 FLASHCARDS_TEMPLATE = "flashcards.jinja2"
 
 
-class GenerationError(RuntimeError):
-    """Raised when LLM output cannot be parsed or validated."""
-
-
-def _strip_code_fences(text: str) -> str:
-    t = text.strip()
-    if t.startswith("```"):
-        t = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", t)
-        if t.endswith("```"):
-            t = t[: -len("```")]
-    return t.strip()
-
-
 def _parse_json(text: str) -> dict | list:
-    """Parse the first JSON object/array found in model output."""
-    cleaned = _strip_code_fences(text)
-    decoder = json.JSONDecoder()
+    """Parse JSON object/array from model output, allowing optional markdown code fences."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1].removesuffix("```").strip()
 
-    # Fast path: whole output is valid JSON.
     try:
         obj = json.loads(cleaned)
-        if isinstance(obj, (dict, list)):
-            return obj
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid JSON from model output: {cleaned}") from e
 
-    # Common path: model wraps JSON with prose; decode from first plausible start.
-    starts = sorted(i for i in (cleaned.find("{"), cleaned.find("[")) if i != -1)
-    if not starts:
-        raise GenerationError("No JSON object found in model output.")
+    if not isinstance(obj, (dict, list)):
+        raise RuntimeError(f"Expected JSON object or array, got {type(obj).__name__}.")
 
-    for start in starts:
-        try:
-            obj, _end = decoder.raw_decode(cleaned, idx=start)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, (dict, list)):
-            return obj
-
-    raise GenerationError("Invalid JSON from model output.")
+    return obj
 
 
 def _resolve_target(
@@ -100,10 +61,6 @@ def _resolve_target(
     return chunks, scope, target
 
 
-def _batch(items: list[RetrievedChunk], size: int) -> list[list[RetrievedChunk]]:
-    return [items[i : i + size] for i in range(0, len(items), size)]
-
-
 def _validate_items(
     payload: object,
     key: str,
@@ -113,10 +70,10 @@ def _validate_items(
     valid_markers: set[str],
 ) -> list:
     if not isinstance(payload, dict):
-        raise GenerationError(f"Expected JSON object for {label}.")
+        raise RuntimeError(f"Expected JSON object for {label}.")
     raw_items = payload.get(key)
     if not isinstance(raw_items, list):
-        raise GenerationError(f"Expected '{key}' to be a list for {label}.")
+        raise RuntimeError(f"Expected '{key}' to be a list for {label}.")
 
     items: list = []
     seen: set[str] = set()
@@ -136,19 +93,19 @@ def _validate_items(
         items.append(item.model_copy(update={"source_markers": markers}))
 
     if not items:
-        raise GenerationError(f"No valid {label} produced.")
+        raise RuntimeError(f"No valid {label} produced.")
     return items
 
 
 def _validate_summary_payload(payload: object) -> tuple[str, list[str]]:
     if not isinstance(payload, dict):
-        raise GenerationError("Expected a JSON object for summary.")
+        raise RuntimeError("Expected a JSON object for summary.")
     summary = payload.get("summary")
     key_points = payload.get("key_points", [])
     if not isinstance(summary, str):
-        raise GenerationError("Summary payload missing 'summary' string.")
+        raise RuntimeError("Summary payload missing 'summary' string.")
     if not isinstance(key_points, list) or not all(isinstance(x, str) for x in key_points):
-        raise GenerationError("Summary payload 'key_points' must be a list of strings.")
+        raise RuntimeError("Summary payload 'key_points' must be a list of strings.")
     return summary.strip(), [kp.strip() for kp in key_points if kp.strip()]
 
 
@@ -168,7 +125,7 @@ def summarize(
     )
 
     if not chunks:
-        raise GenerationError("No chunks available for summarization.")
+        raise RuntimeError("No chunks available for summarization.")
 
     batch_size = settings.summarize_batch_size
     if len(chunks) <= batch_size:
@@ -178,12 +135,14 @@ def summarize(
     else:
         n_batches = (len(chunks) + batch_size - 1) // batch_size
         partials: list[dict] = []
-        for i, batch in enumerate(_batch(chunks, batch_size), start=1):
-            logger.info("Summarizing batch {}/{}", i, n_batches)
+
+        for batch_index, start in enumerate(range(0, len(chunks), batch_size), start=1):
+            logger.info("Summarizing batch {}/{}", batch_index, n_batches)
+            batch = chunks[start : start + batch_size]
             prompt = render_prompt(SUMMARY_MAP_TEMPLATE, chunks=batch)
             payload = _parse_json(invoke_llm(prompt))
-            s, kp = _validate_summary_payload(payload)
-            partials.append({"summary": s, "key_points": kp})
+            summary_text, key_points = _validate_summary_payload(payload)
+            partials.append({"summary": summary_text, "key_points": key_points})
 
         reduce_prompt = render_prompt(SUMMARY_REDUCE_TEMPLATE, partials=partials)
         payload = _parse_json(invoke_llm(reduce_prompt))
@@ -205,7 +164,7 @@ def generate_quiz(
     count: int | None = None,
     k: int | None = None,
 ) -> QuizSet:
-    """Grounded multiple-choice quiz; raises GenerationError if output is unparseable."""
+    """Grounded multiple-choice quiz; raises RuntimeError if output is unparseable."""
     chunks, scope, target = _resolve_target(
         document=document,
         query=query,
@@ -214,7 +173,7 @@ def generate_quiz(
         retrieval_k=settings.generation_retrieval_k,
     )
     if not chunks:
-        raise GenerationError("No chunks available for quiz generation.")
+        raise RuntimeError("No chunks available for quiz generation.")
 
     n = count or settings.quiz_default_count
     valid_markers = {f"S{i}" for i in range(1, len(chunks) + 1)}
@@ -238,7 +197,7 @@ def generate_flashcards(
     count: int | None = None,
     k: int | None = None,
 ) -> FlashcardSet:
-    """Grounded flashcard set for spaced repetition; raises GenerationError if output is unparseable."""
+    """Grounded flashcard set for spaced repetition; raises RuntimeError if output is unparseable."""
     chunks, scope, target = _resolve_target(
         document=document,
         query=query,
@@ -247,7 +206,7 @@ def generate_flashcards(
         retrieval_k=settings.generation_retrieval_k,
     )
     if not chunks:
-        raise GenerationError("No chunks available for flashcard generation.")
+        raise RuntimeError("No chunks available for flashcard generation.")
 
     n = count or settings.flashcards_default_count
     valid_markers = {f"S{i}" for i in range(1, len(chunks) + 1)}

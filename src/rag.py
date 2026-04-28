@@ -1,46 +1,18 @@
-"""Retrieval, prompts, LLM, citations, and grounded answers."""
+"""Retrieval, prompts, citations, and grounded answers."""
 
 from functools import lru_cache
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
-from qdrant_client.http import models as qmodels
 
 from src.config import settings
+from src.filters import filters_to_qdrant
+from src.llm import invoke_llm
 from src.schemas import ChunkMetadata, Citation, RagAnswer, RetrievedChunk
 from src.store import get_vector_store, scroll_all
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 ANSWER_TEMPLATE = "answer.jinja2"
-
-
-def _metadata_filter(filters: dict[str, object] | None) -> qmodels.Filter | None:
-    if not filters:
-        return None
-    conditions: list[qmodels.FieldCondition] = []
-    for field, value in filters.items():
-        if value is None:
-            continue
-        key = f"metadata.{field}"
-        if field == "filenames" and isinstance(value, list):
-            names = [x for x in value if isinstance(x, str) and x]
-            if names:
-                conditions.append(
-                    qmodels.FieldCondition(
-                        key="metadata.filename", match=qmodels.MatchAny(any=names)
-                    )
-                )
-            continue
-        if isinstance(value, (str, int)):
-            conditions.append(
-                qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value))
-            )
-    if not conditions:
-        return None
-    return qmodels.Filter(must=conditions)
 
 
 def retrieve(
@@ -53,7 +25,7 @@ def retrieve(
     hits = store.similarity_search_with_score(
         query=query,
         k=k or settings.top_k,
-        filter=_metadata_filter(filters),
+        filter=filters_to_qdrant(filters),
     )
     return [
         RetrievedChunk(
@@ -72,7 +44,7 @@ def fetch_all_chunks(
     """Scroll every chunk matching the filter, ordered by filename → page → index."""
     name = collection_name or settings.qdrant_collection
     results: list[RetrievedChunk] = []
-    for page in scroll_all(name, scroll_filter=_metadata_filter(filters)):
+    for page in scroll_all(name, scroll_filter=filters_to_qdrant(filters)):
         for point in page:
             payload = point.payload or {}
             meta = payload.get("metadata") or {}
@@ -118,81 +90,6 @@ def format_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
         )
         for i, c in enumerate(chunks, start=1)
     ]
-
-
-def _build_hf_local() -> BaseChatModel:
-    """Build a chat model backed by a local Transformers pipeline."""
-    import torch
-    from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
-    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-
-    do_sample = settings.llm_temperature > 0
-
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(settings.hf_model)
-        model = AutoModelForCausalLM.from_pretrained(settings.hf_model, dtype=torch.bfloat16)
-        model.generation_config.max_length = None
-
-        text_gen_pipeline = pipeline(
-            task="text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device=settings.hf_device,
-            return_full_text=False,
-        )
-        text_gen_pipeline.generation_config.max_new_tokens = settings.hf_max_new_tokens
-        text_gen_pipeline.generation_config.max_length = None
-        text_gen_pipeline.generation_config.do_sample = do_sample
-        if do_sample:
-            text_gen_pipeline.generation_config.temperature = settings.llm_temperature
-
-        llm = HuggingFacePipeline(pipeline=text_gen_pipeline)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load Hugging Face model '{settings.hf_model}': {e}") from e
-
-    return ChatHuggingFace(llm=llm)
-
-
-def _build_gemini() -> BaseChatModel:
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    if not settings.google_api_key:
-        raise RuntimeError(
-            "GOOGLE_API_KEY is not set. Add it to .env before using provider 'gemini'."
-        )
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        temperature=settings.llm_temperature,
-        google_api_key=settings.google_api_key,
-    )
-
-
-def _build_vllm() -> BaseChatModel:
-    return ChatOpenAI(
-        model=settings.hf_model,
-        openai_api_key=settings.vllm_api_key,
-        openai_api_base=settings.vllm_api_base,
-        temperature=settings.llm_temperature,
-    )
-
-
-@lru_cache(maxsize=4)
-def get_llm(provider: str | None = None) -> BaseChatModel:
-    """Return a cached LLM instance (optionally overriding provider)."""
-    provider = provider or settings.llm_provider
-    if provider == "hf_local":
-        return _build_hf_local()
-    if provider == "gemini":
-        return _build_gemini()
-    if provider == "vllm":
-        return _build_vllm()
-    raise ValueError(f"Unknown llm_provider '{provider}'. Expected 'hf_local' | 'gemini' | 'vllm'.")
-
-
-def invoke_llm(prompt: str, provider: str | None = None) -> str:
-    """Invoke an LLM (optionally overriding provider) and return text."""
-    response = get_llm(provider=provider).invoke([HumanMessage(content=prompt)])
-    return response.content if isinstance(response.content, str) else str(response.content)
 
 
 def answer(

@@ -1,7 +1,6 @@
 """Application configuration.
 
-Defaults live in code.
-Secrets and machine-specific overrides come from environment variables.
+Defaults live in code; a small set of values can be overridden via env vars.
 """
 
 from functools import lru_cache

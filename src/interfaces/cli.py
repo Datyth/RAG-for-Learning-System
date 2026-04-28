@@ -7,13 +7,7 @@ import typer
 from loguru import logger
 from pydantic import BaseModel
 
-from src.export import (
-    model_to_text,
-    to_json,
-    write_json,
-    write_markdown,
-    write_text,
-)
+from src.export import export
 from src.indexing import ingest as ingest_data_dir
 from src.learning import (
     GenerationError,
@@ -82,15 +76,10 @@ def _validate_format(fmt: str) -> str:
 
 def _emit(model: BaseModel, output: Path | None, fmt: str) -> None:
     if output:
-        if fmt == "json":
-            written = write_json(model, output)
-        elif fmt == "md":
-            written = write_markdown(model, output)
-        else:
-            written = write_text(output, model_to_text(model))
+        written = export(model, fmt=fmt, output=output)
         typer.echo(f"Wrote {written}")
         return
-    typer.echo(to_json(model) if fmt == "json" else model_to_text(model))
+    typer.echo(export(model, fmt=fmt))
 
 
 @app.command()
@@ -248,7 +237,12 @@ def flashcards(
 
 def main() -> None:
     logger.remove()
-    logger.add(lambda m: typer.echo(m, err=True), level="INFO", colorize=True)
+    logger.add(
+        lambda m: typer.echo(m, err=True),
+        level="INFO",
+        colorize=True,
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <6}</level> | {message}",
+    )
     try:
         app()
     finally:

@@ -1,5 +1,5 @@
 """Chunking utilities for evaluation experiments."""
 
-from .chunkers import RecursiveChunker, SemanticChunker
+from .chunkers import RecursiveChunker
 
-__all__ = ["RecursiveChunker", "SemanticChunker"]
+__all__ = ["RecursiveChunker"]

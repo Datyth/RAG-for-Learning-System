@@ -52,6 +52,7 @@ class Summary(BaseModel):
     summary: str
     key_points: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    chunks: list[RetrievedChunk] = Field(default_factory=list)
 
 
 class QuizItem(BaseModel):
@@ -81,6 +82,7 @@ class QuizSet(BaseModel):
     target: str | None = None
     items: list[QuizItem] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    chunks: list[RetrievedChunk] = Field(default_factory=list)
 
 
 class Flashcard(BaseModel):
@@ -100,3 +102,4 @@ class FlashcardSet(BaseModel):
     target: str | None = None
     cards: list[Flashcard] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    chunks: list[RetrievedChunk] = Field(default_factory=list)

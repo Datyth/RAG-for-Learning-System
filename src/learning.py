@@ -154,6 +154,7 @@ def summarize(
         summary=summary_text,
         key_points=key_points,
         citations=format_citations(chunks),
+        chunks=chunks,
     )
 
 
@@ -187,6 +188,7 @@ def generate_quiz(
         target=target,
         items=items,
         citations=format_citations(chunks),
+        chunks=chunks,
     )
 
 
@@ -220,4 +222,5 @@ def generate_flashcards(
         target=target,
         cards=cards,
         citations=format_citations(chunks),
+        chunks=chunks,
     )

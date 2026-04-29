@@ -11,7 +11,8 @@ All user-facing text is in Vietnamese.
 """
 
 import html
-from typing import TypeVar
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import streamlit as st
@@ -25,7 +26,7 @@ from src.schemas import Citation, FlashcardSet, QuizSet, RagAnswer, RetrievedChu
 
 _API = settings.api_url
 _ALL_PAGES = "(Tất cả trang)"
-T = TypeVar("T", bound=BaseModel)
+_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 def _api(method: str, path: str, **kwargs) -> httpx.Response:
@@ -43,12 +44,58 @@ def _error_detail(r: httpx.Response) -> str:
         return r.text
 
 
-def _post_model(path: str, payload: dict, model: type[T], err: str) -> T | None:
+def _post_model(path: str, payload: dict, model: type[BaseModel], err: str) -> BaseModel | None:
     r = _api("POST", path, json=payload)
     if r.is_error:
         st.error(f"{err}: {_error_detail(r)}")
         return None
     return model.model_validate(r.json())
+
+
+def _post_model_with_progress(
+    path: str,
+    payload: dict,
+    model: type[BaseModel],
+    err: str,
+    label: str,
+) -> BaseModel | None:
+    """POST in a background thread while showing progress in the UI."""
+
+    def _work() -> tuple[dict | None, str | None]:
+        try:
+            r = httpx.request("POST", f"{_API}{path}", timeout=120, json=payload)
+        except httpx.HTTPError as exc:
+            return None, str(exc)
+        if r.is_error:
+            return None, _error_detail(r)
+        try:
+            return r.json(), None
+        except ValueError:
+            return None, r.text
+
+    progress = st.progress(0, text=f"{label}…")
+    started = time.monotonic()
+    fut = _EXECUTOR.submit(_work)
+    pct = 0
+
+    while not fut.done():
+        elapsed = time.monotonic() - started
+        pct = int(min(90, (elapsed / 12.0) * 90))
+        progress.progress(pct, text=f"{label}…")
+        time.sleep(0.12)
+
+    progress.progress(100, text=f"{label}…")
+    time.sleep(0.08)
+    progress.empty()
+
+    data, error = fut.result()
+    if error:
+        st.error(f"{err}: {error}")
+        return None
+    if data is None:
+        st.error(err)
+        return None
+    return model.model_validate(data)
 
 
 def _filters_json(filenames: list[str], page: int | None) -> dict | None:
@@ -72,28 +119,25 @@ def _downloads(res: BaseModel, stem: str) -> None:
     c2.download_button("Tải Markdown", export(res, fmt="md"), f"{stem}.md", "text/markdown")
 
 
-def _render_citations(citations: list[Citation]) -> None:
+def _render_citations(citations: list[Citation], chunks: list[RetrievedChunk] | None = None) -> None:
     if not citations:
         return
-    chips = "".join(
-        f'<span class="src-chip"><b>{html.escape(c.source_marker)}</b>'
-        f'<span class="src-chip-meta">{html.escape(c.filename)} tr.{c.page}'
-        f"{' · ' + html.escape(c.section) if c.section else ''}</span></span>"
-        for c in citations
-    )
+
+    by_marker: dict[str, RetrievedChunk] = {}
+    if chunks:
+        by_marker = {f"S{i}": c for i, c in enumerate(chunks, start=1)}
+
     with st.expander("Nguồn trích dẫn", expanded=False):
-        st.markdown(f'<div class="src-chips">{chips}</div>', unsafe_allow_html=True)
-
-
-def _render_chunks(chunks: list[RetrievedChunk]) -> None:
-    if not chunks:
-        return
-    with st.expander("Chi tiết đoạn văn được trích", expanded=False):
-        for i, c in enumerate(chunks, 1):
-            st.markdown(
-                f"**[S{i}] {c.metadata.filename} — trang {c.metadata.page}** · điểm: {c.score:.3f}"
-            )
-            st.code(c.text.strip(), language="text")
+        for c in citations:
+            chunk = by_marker.get(c.source_marker)
+            score = f" · điểm: {chunk.score:.3f}" if chunk else ""
+            header = f"**[{c.source_marker}] {c.filename} — trang {c.page}**{score}"
+            if c.section:
+                header += f" · {c.section}"
+            st.markdown(header)
+            if chunk:
+                with st.expander("Xem đoạn trích", expanded=False):
+                    st.code(chunk.text.strip(), language="text")
 
 
 def _sidebar() -> tuple[list[str], int | None]:
@@ -184,8 +228,10 @@ def _tab_chat(filenames: list[str], page: int | None) -> None:
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            _render_citations([Citation(**c) for c in msg.get("citations", [])])
-            _render_chunks([RetrievedChunk(**c) for c in msg.get("chunks", [])])
+            _render_citations(
+                [Citation(**c) for c in msg.get("citations", [])],
+                [RetrievedChunk(**c) for c in msg.get("chunks", [])],
+            )
 
     q = st.chat_input("Đặt câu hỏi về tài liệu...")
     if not q:
@@ -205,8 +251,7 @@ def _tab_chat(filenames: list[str], page: int | None) -> None:
         if not res:
             return
         st.markdown(res.answer)
-        _render_citations(res.citations)
-        _render_chunks(res.chunks)
+        _render_citations(res.citations, res.chunks)
 
     st.session_state.chat_history.append(
         {
@@ -227,18 +272,18 @@ def _tab_summary(filenames: list[str], page: int | None) -> None:
     if not submit:
         return
 
-    with st.spinner("Đang tóm tắt..."):
-        res = _post_model(
-            "/summarize",
-            {
-                "document": None,
-                "query": query or None,
-                "filters": _filters_json(filenames, page),
-                "k": int(k),
-            },
-            Summary,
-            "Không thể tóm tắt",
-        )
+    res = _post_model_with_progress(
+        "/summarize",
+        {
+            "document": None,
+            "query": query or None,
+            "filters": _filters_json(filenames, page),
+            "k": int(k),
+        },
+        Summary,
+        "Không thể tóm tắt",
+        "Đang tóm tắt",
+    )
     if not res:
         return
     if not res.summary:
@@ -261,7 +306,7 @@ def _tab_summary(filenames: list[str], page: int | None) -> None:
             unsafe_allow_html=True,
         )
 
-    _render_citations(res.citations)
+    _render_citations(res.citations, res.chunks)
     _downloads(res, "summary")
 
 
@@ -281,19 +326,19 @@ def _tab_quiz(filenames: list[str], page: int | None) -> None:
             k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             submit = st.form_submit_button("Tạo quiz", use_container_width=True, type="primary")
         if submit:
-            with st.spinner("Đang tạo quiz..."):
-                res = _post_model(
-                    "/quiz",
-                    {
-                        "document": None,
-                        "query": query or None,
-                        "filters": _filters_json(filenames, page),
-                        "count": int(count),
-                        "k": int(k),
-                    },
-                    QuizSet,
-                    "Không thể tạo quiz",
-                )
+            res = _post_model_with_progress(
+                "/quiz",
+                {
+                    "document": None,
+                    "query": query or None,
+                    "filters": _filters_json(filenames, page),
+                    "count": int(count),
+                    "k": int(k),
+                },
+                QuizSet,
+                "Không thể tạo quiz",
+                "Đang tạo quiz",
+            )
             if res:
                 st.session_state.quiz_res = res
                 st.session_state.quiz_submitted = False
@@ -368,7 +413,7 @@ def _tab_quiz(filenames: list[str], page: int | None) -> None:
         st.session_state.quiz_submitted = True
         st.rerun()
 
-    _render_citations(res.citations)
+    _render_citations(res.citations, res.chunks)
     _downloads(res, "quiz")
 
 
@@ -392,19 +437,19 @@ def _tab_flashcards(filenames: list[str], page: int | None) -> None:
             k = c2.number_input("Số đoạn truy xuất", 1, 64, 16)
             submit = st.form_submit_button("Tạo thẻ", use_container_width=True, type="primary")
         if submit:
-            with st.spinner("Đang tạo flashcards..."):
-                res = _post_model(
-                    "/flashcards",
-                    {
-                        "document": None,
-                        "query": query or None,
-                        "filters": _filters_json(filenames, page),
-                        "count": int(count),
-                        "k": int(k),
-                    },
-                    FlashcardSet,
-                    "Không thể tạo thẻ",
-                )
+            res = _post_model_with_progress(
+                "/flashcards",
+                {
+                    "document": None,
+                    "query": query or None,
+                    "filters": _filters_json(filenames, page),
+                    "count": int(count),
+                    "k": int(k),
+                },
+                FlashcardSet,
+                "Không thể tạo thẻ",
+                "Đang tạo flashcards",
+            )
             if res:
                 st.session_state.fc_res = res
                 st.session_state.fc_idx = 0
@@ -458,7 +503,7 @@ def _tab_flashcards(filenames: list[str], page: int | None) -> None:
             st.session_state.fc_flipped = False
             st.rerun()
 
-    _render_citations(res.citations)
+    _render_citations(res.citations, res.chunks)
     _downloads(res, "flashcards")
 
 

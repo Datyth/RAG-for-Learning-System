@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from src.filters import MetadataFilter, filters_to_dict
 from src.indexing import save_and_ingest_pdf
 from src.learning import (
-    GenerationError,
     generate_flashcards,
     generate_quiz,
     summarize as summarize_learning,
@@ -108,7 +107,7 @@ def summarize(req: SummarizeRequest) -> Summary:
             filters=filters_to_dict(req.filters),
             k=req.k,
         )
-    except GenerationError as exc:
+    except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -123,7 +122,7 @@ def quiz(req: QuizRequest) -> QuizSet:
             count=req.count,
             k=req.k,
         )
-    except GenerationError as exc:
+    except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -138,7 +137,7 @@ def flashcards(req: FlashcardsRequest) -> FlashcardSet:
             count=req.count,
             k=req.k,
         )
-    except GenerationError as exc:
+    except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

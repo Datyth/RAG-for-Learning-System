@@ -32,7 +32,7 @@ def _summary_metrics(df: pd.DataFrame) -> dict[str, float]:
     numeric = df.select_dtypes(include=["number"])
     if numeric.empty:
         return {}
-    means = numeric.mean(numeric_only=True).to_dict()
+    means = numeric.mean().to_dict()
     return {str(k): float(v) for k, v in means.items() if pd.notna(v)}
     
 
@@ -133,10 +133,7 @@ def main() -> None:
 
         row = {"Strategy": res["strategy_id"], "Chunks": res["chunk_count"]}
         for metric_name, score in res["summary_metrics"].items():
-            if pd.isna(score):
-                row[metric_name] = 0.0
-            else:
-                row[metric_name] = round(float(score), 4)
+            row[metric_name] = round(float(score), 4)
 
         comparison_data.append(row)
 

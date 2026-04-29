@@ -4,7 +4,6 @@ import hashlib
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Protocol
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
@@ -14,11 +13,6 @@ from loguru import logger
 from src.config import settings
 from src.schemas import ChunkMetadata
 from src.store import ensure_collection, get_vector_store
-
-
-class Chunker(Protocol):
-    def split_documents(self, documents: list[Document]) -> list[Document]:
-        """Split page-level documents into chunk-level documents."""
 
 
 def _splitter(
@@ -69,7 +63,7 @@ def build_chunks(
     pdf_paths: list[Path],
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
-    chunker: Chunker | None = None,
+    chunker: object | None = None,
 ) -> list[Document]:
     page_docs: list[Document] = []
     for path in pdf_paths:
@@ -113,7 +107,7 @@ def index_chunks(chunks: list[Document], collection_name: str | None = None) -> 
 def ingest(
     recreate: bool = False,
     collection_name: str | None = None,
-    chunker: Chunker | None = None,
+    chunker: object | None = None,
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
 ) -> int:

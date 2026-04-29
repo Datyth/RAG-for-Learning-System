@@ -17,8 +17,7 @@ class MetadataFilter(BaseModel):
 
     @model_validator(mode="after")
     def _normalize(self) -> "MetadataFilter":
-        names = [x for x in (self.filenames or []) if isinstance(x, str) and x.strip()]
-        names = [n.strip() for n in names if n.strip()]
+        names = [n.strip() for n in (self.filenames or []) if isinstance(n, str) and n.strip()]
         if not names:
             self.filenames = None
         elif len(names) == 1:
@@ -35,8 +34,7 @@ class MetadataFilter(BaseModel):
         return self
 
 
-def coerce_filter(filters: MetadataFilter | dict[str, object] | None) -> MetadataFilter | None:
-    """Coerce a dict (or None) into a normalized `MetadataFilter`."""
+def _coerce_filter(filters: MetadataFilter | dict[str, object] | None) -> MetadataFilter | None:
     if filters is None:
         return None
     if isinstance(filters, MetadataFilter):
@@ -48,7 +46,7 @@ def coerce_filter(filters: MetadataFilter | dict[str, object] | None) -> Metadat
 
 def filters_to_dict(filters: MetadataFilter | dict[str, object] | None) -> dict[str, object] | None:
     """Return normalized flat dict suitable for downstream filtering."""
-    f = coerce_filter(filters)
+    f = _coerce_filter(filters)
     if f is None:
         return None
     return f.model_dump(exclude_none=True) or None
@@ -62,9 +60,6 @@ def filters_to_qdrant(filters: MetadataFilter | dict[str, object] | None) -> qmo
 
     conditions: list[qmodels.FieldCondition] = []
     for field, value in flat.items():
-        if value is None:
-            continue
-
         if field == "filenames" and isinstance(value, list):
             names = [x for x in value if isinstance(x, str) and x]
             if names:

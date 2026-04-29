@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from src.export import export
 from src.indexing import ingest as ingest_data_dir
 from src.learning import (
-    GenerationError,
     generate_flashcards,
     generate_quiz,
     summarize as summarize_learning,
@@ -170,7 +169,7 @@ def summarize(
             filters=_parse_filters(filters),
             k=k,
         )
-    except GenerationError as e:
+    except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
@@ -199,7 +198,7 @@ def quiz(
             count=count,
             k=k,
         )
-    except GenerationError as e:
+    except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
@@ -228,7 +227,7 @@ def flashcards(
             count=count,
             k=k,
         )
-    except GenerationError as e:
+    except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 

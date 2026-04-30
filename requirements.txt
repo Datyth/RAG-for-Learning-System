@@ -26,3 +26,4 @@ transformers>=4.56.0,<5
 typer>=0.24,<0.25
 uvicorn[standard]>=0.34,<0.40
 vllm>=0.19.1
+langchain-experimental >= 0.4.1

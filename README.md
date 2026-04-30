@@ -339,7 +339,7 @@ Features:
 <details>
 <summary>Offline chunking evaluation with Ragas</summary>
 
-The repo includes a benchmark runner at `src/evaluation/run_chunking_eval.py`. It:
+The repo includes a benchmark runner at `src/evaluation/run_chunking.py`. It:
 
 - loads test cases from `src/evaluation/benchmark_rag.csv`
 - re-ingests the corpus into a separate Qdrant collection per chunking strategy
@@ -347,11 +347,36 @@ The repo includes a benchmark runner at `src/evaluation/run_chunking_eval.py`. I
 - writes per-strategy JSON artifacts and a comparison CSV under `artifacts/eval/chunking/`
 
 ```bash
-uv run python src/evaluation/run_chunking_eval.py
-uv run python src/evaluation/run_chunking_eval.py --test-path src/evaluation/benchmark_rag.csv
+uv run python src/evaluation/run_chunking.py --mode recursive
+uv run python src/evaluation/run_chunking.py --mode semantic
+uv run python src/evaluation/run_chunking.py --mode both
+
+# Custom benchmark CSV
+uv run python src/evaluation/run_chunking.py --mode recursive --test-path src/evaluation/benchmark_rag.csv
 ```
 
-Make sure a vLLM server is running first if you keep the default evaluation provider.
+Notes:
+
+- `--mode semantic` (or `both`) loads the embedding model to drive semantic chunking.
+- Each strategy uses its own collection name: `{qdrant_collection}__{strategy_id}`.
+- Keep a vLLM server running (see vLLM setup below), since the evaluation harness uses `llm_provider="vllm"`.
+
+</details>
+
+<details>
+<summary>Offline reranking evaluation with Ragas</summary>
+
+The repo also includes a reranking benchmark runner at `src/evaluation/run_reranking.py`. It:
+
+- ingests the corpus into a dedicated collection using Recursive chunking (1000/150)
+- reranks retrieved chunks using `BAAI/bge-reranker-v2-m3`
+- runs Ragas evaluation with `llm_provider="vllm"`
+- writes `reranking_report.json` and `reranking_metrics.csv` under `artifacts/eval/reranking/`
+
+```bash
+uv run python src/evaluation/run_reranking.py
+uv run python src/evaluation/run_reranking.py --test-path src/evaluation/benchmark_rag.csv
+```
 
 </details>
 

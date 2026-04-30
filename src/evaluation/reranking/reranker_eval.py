@@ -140,12 +140,12 @@ def main() -> None:
         sys.exit(1)
 
     # 2. Cấu hình Chunking và tạo Collection
-    chunker_id = "recursive_1500_150"
+    chunker_id = "recursive_1000_150"
     collection_name = f"{settings.qdrant_collection}_rerank_{chunker_id}"
     
-    logger.info("Initializing Recursive Chunking (1500, 150)...")
+    logger.info("Initializing Recursive Chunking (1000, 150)...")
     recursive_chunker = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
+        chunk_size=1000,
         chunk_overlap=150,
         length_function=len,
         separators=["\n\n", "\n", " ", ""]

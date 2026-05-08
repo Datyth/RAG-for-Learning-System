@@ -1,11 +1,11 @@
-# RAG for Learning System
+# Simple NotebookLM
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/uv-package%20manager-DE5FE9)
 ![Qdrant](https://img.shields.io/badge/Qdrant-vector%20store-DC244C)
 ![LangChain](https://img.shields.io/badge/LangChain-framework-1C3C3C)
 
-> A local Retrieval-Augmented Generation pipeline for studying PDF documents.
+> A local NotebookLM-style assistant for studying PDF documents.
 > Generates grounded answers, summaries, quizzes, and flashcards.
 
 ## Table of Contents
@@ -43,9 +43,20 @@
 
 ```mermaid
 flowchart LR
-    PDF["PDF files (data/)"] --> IDX["indexing.py\nPyPDFLoader + Splitter"]
-    IDX --> EMB["store.py\nHuggingFaceEmbeddings"]
-    EMB --> QD[("Qdrant\nstorage/qdrant/")]
+    DATA["data/\nPDF files"] --> LOAD["indexing.py\nPyPDFLoader"]
+    LOAD --> PAGES["Page Documents\nfilename · page · source"]
+    PAGES --> SPLIT["RecursiveCharacterTextSplitter\nchunk_size · chunk_overlap"]
+    SPLIT --> META["Chunk metadata\nstable chunk_id · document_id"]
+    META --> EMB["store.py\nHuggingFaceEmbeddings"]
+    EMB --> QD[("Qdrant\nstorage/qdrant/\nrag_chunks")]
+
+    classDef file fill:#eff6ff,stroke:#2563eb,color:#1e3a8a;
+    classDef process fill:#f8fafc,stroke:#475569,color:#0f172a;
+    classDef store fill:#f0fdf4,stroke:#16a34a,color:#14532d;
+
+    class DATA file;
+    class LOAD,PAGES,SPLIT,META,EMB process;
+    class QD store;
 ```
 
 </details>
@@ -54,21 +65,67 @@ flowchart LR
 <summary><b>Query pipeline</b></summary>
 
 ```mermaid
-flowchart TD
-    Input(["Question / Document"])
-    RAG["rag.py — retrieve · render_prompt · answer"]
-    LLM["llm.py — provider setup · invoke_llm"]
-    LRN["learning.py — summarize · quiz · flashcards"]
-    API["FastAPI :8000"]
-    CLI["CLI — Typer"]
-    UI["Streamlit UI — httpx"]
+flowchart TB
+    subgraph INTF["Interfaces"]
+        CLI["CLI\nuv run rag ..."]
+        API["FastAPI\n:8000"]
+        UI["Streamlit UI\n:8501"]
+    end
 
-    Input --> RAG & LRN
+    subgraph CORE["Application core"]
+        FILTER["filters.py\nnormalize metadata filters"]
+        RAG["rag.py\nretrieve · cite · answer"]
+        LEARN["learning.py\nsummarize · quiz · flashcards"]
+        PROMPTS["prompts/*.jinja2\nVietnamese grounded prompts"]
+        OUTPUT["Pydantic outputs\nanswer · summary · quiz · flashcards"]
+    end
+
+    subgraph DATA["Storage"]
+        QD[("Qdrant\nchunks + metadata")]
+        EMB["store.py\nembeddings + vector store"]
+    end
+
+    subgraph MODEL["LLM providers"]
+        LLM["llm.py\nhf_local · vllm · gemini"]
+    end
+
+    EXPORT["export.py\nJSON · Markdown"]
+    RESULT(["Grounded response\ncitations + source chunks"])
+
+    USER(["User question / study task"]) --> CLI
+    USER --> UI
+    UI -- HTTP --> API
+    CLI --> FILTER
+    API --> FILTER
+    FILTER --> RAG
+    FILTER --> LEARN
+    RAG --> EMB --> QD
+    LEARN --> EMB
+    RAG --> PROMPTS --> LLM
+    LEARN --> PROMPTS
+    LEARN --> LLM
     RAG --> LLM
-    LRN --> LLM
-    RAG --> API & CLI
-    LRN --> API & CLI
-    API --> UI
+    RAG --> OUTPUT
+    LEARN --> OUTPUT
+    OUTPUT --> API
+    OUTPUT --> CLI
+    OUTPUT --> EXPORT
+    API -- JSON --> UI
+    CLI --> RESULT
+    UI --> RESULT
+    EXPORT --> RESULT
+
+    classDef interface fill:#eff6ff,stroke:#2563eb,color:#1e3a8a;
+    classDef core fill:#f8fafc,stroke:#475569,color:#0f172a;
+    classDef storage fill:#f0fdf4,stroke:#16a34a,color:#14532d;
+    classDef model fill:#fff7ed,stroke:#ea580c,color:#7c2d12;
+    classDef user fill:#fdf2f8,stroke:#db2777,color:#831843;
+
+    class CLI,API,UI interface;
+    class FILTER,RAG,LEARN,PROMPTS,OUTPUT,EXPORT core;
+    class QD,EMB storage;
+    class LLM model;
+    class USER,RESULT user;
 ```
 
 </details>

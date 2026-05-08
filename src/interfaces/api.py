@@ -55,8 +55,8 @@ class UploadResponse(BaseModel):
 
 
 app = FastAPI(
-    title="RAG Learning API",
-    description="Grounded Q&A, summaries, quizzes, and flashcards over indexed PDFs.",
+    title="Simple NotebookLM API",
+    description="Local PDF Q&A, summaries, quizzes, and flashcards with grounded citations.",
     version="0.1.0",
 )
 

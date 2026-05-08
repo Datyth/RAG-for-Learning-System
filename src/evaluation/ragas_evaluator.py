@@ -35,10 +35,10 @@ def get_ragas_metrics(llm, embeddings) -> list[ragas.metrics.Metric]:
 def load_test_cases(path: str) -> list[dict[str, str]]:
     """Load benchmark CSV rows as {"question","ground_truth"} pairs."""
 
-    dataset = Dataset.from_csv(path)
-    if "ground truth" in dataset.column_names:
-        dataset = dataset.rename_column("ground truth", "ground_truth")
-    return [{"question": r["question"], "ground_truth": r["ground_truth"]} for r in dataset]
+    df = pd.read_csv(path)
+    if "ground truth" in df.columns:
+        df = df.rename(columns={"ground truth": "ground_truth"})
+    return df[["question", "ground_truth"]].to_dict(orient="records")
 
 
 def summary_metrics(df: pd.DataFrame) -> dict[str, float]:

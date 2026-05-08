@@ -24,7 +24,7 @@ def retrieve(
     store = get_vector_store(collection_name=collection_name)
     hits = store.similarity_search_with_score(
         query=query,
-        k=k or settings.top_k,
+        k=settings.top_k if k is None else k,
         filter=filters_to_qdrant(filters),
     )
     return [
@@ -42,7 +42,7 @@ def fetch_all_chunks(
     collection_name: str | None = None,
 ) -> list[RetrievedChunk]:
     """Scroll every chunk matching the filter, ordered by filename → page → index."""
-    name = collection_name or settings.qdrant_collection
+    name = settings.qdrant_collection if collection_name is None else collection_name
     results: list[RetrievedChunk] = []
     for page in scroll_all(name, scroll_filter=filters_to_qdrant(filters)):
         for point in page:

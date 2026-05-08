@@ -18,12 +18,9 @@ from src.store import ensure_collection, get_vector_store
 def _splitter(
     chunk_size: int | None = None, chunk_overlap: int | None = None
 ) -> RecursiveCharacterTextSplitter:
-    size = chunk_size or settings.chunk_size
-    overlap = chunk_overlap or settings.chunk_overlap
-
     return RecursiveCharacterTextSplitter(
-        chunk_size=size,
-        chunk_overlap=overlap,
+        chunk_size=settings.chunk_size if chunk_size is None else chunk_size,
+        chunk_overlap=settings.chunk_overlap if chunk_overlap is None else chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
         keep_separator=False,
     )
@@ -55,7 +52,7 @@ def _load_pdf(path: Path) -> list[Document]:
 
 
 def discover_pdfs(data_dir: Path | None = None) -> list[Path]:
-    directory = data_dir or settings.data_dir
+    directory = settings.data_dir if data_dir is None else data_dir
     return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
 
 

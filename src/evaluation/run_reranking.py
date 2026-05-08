@@ -12,7 +12,6 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import argparse
-import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +19,6 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 from sentence_transformers import CrossEncoder
-from tabulate import tabulate
 
 from src.config import settings
 from src.evaluation.chunking_strategies import RecursiveChunker
@@ -76,7 +74,7 @@ def main() -> None:
         lambda m: print(m, end=""),
         level="INFO",
         colorize=True,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <4}</level> | {message}",
     )
 
     parser = argparse.ArgumentParser(description="Evaluate reranking strategy with Ragas.")
@@ -99,18 +97,18 @@ def main() -> None:
         logger.info("Loaded {} test cases from {}", len(test_cases), args.test_path)
     except Exception as exc:
         logger.error("Failed to load dataset: {}", exc)
-        sys.exit(1)
+        raise SystemExit(1) from exc
 
     if not test_cases:
         logger.error("Dataset is empty.")
-        sys.exit(1)
+        raise SystemExit(1)
 
     try:
         logger.info("Loading reranker: {} on GPU:1", RERANKER_MODEL)
         reranker = CrossEncoder(RERANKER_MODEL, max_length=512, device="cuda")
     except Exception as exc:
         logger.error("Failed to initialize reranker: {}", exc)
-        sys.exit(1)
+        raise SystemExit(1) from exc
 
     collection_name = f"{settings.qdrant_collection}_rerank_{CHUNKING_STRATEGY_ID}"
     chunker = RecursiveChunker(chunk_size=1000, chunk_overlap=150)
@@ -153,7 +151,7 @@ def main() -> None:
         print("\n" + "=" * 80)
         print(f"Reranking Evaluation (GPU:1) — {RERANKER_MODEL}")
         print("=" * 80)
-        print(tabulate(df_cmp, headers="keys", tablefmt="psql", showindex=False))
+        print(df_cmp.to_string(index=False))
         print("=" * 80 + "\n")
         df_cmp.to_csv(args.output_dir / "reranking_metrics.csv", index=False)
         logger.info("Results saved to {}", args.output_dir)

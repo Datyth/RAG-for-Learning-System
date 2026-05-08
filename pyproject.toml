@@ -1,7 +1,7 @@
 [project]
-name = "rag-for-learning-system"
+name = "simple-notebooklm"
 version = "0.1.0"
-description = "Minimal, production-style RAG core over local PDFs with Qdrant and LangChain."
+description = "Simple NotebookLM-style local PDF study assistant with Qdrant and LangChain."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

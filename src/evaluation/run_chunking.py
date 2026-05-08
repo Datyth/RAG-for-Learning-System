@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
-from tabulate import tabulate
 
 from src.config import settings
 from src.evaluation.chunking_strategies import ChunkingStrategy, default_strategies
@@ -61,13 +60,7 @@ def _evaluate_strategy(
         result = run_evaluation(test_cases, answer_fn=answer_fn, llm_provider="vllm")
         df = result.to_pandas()
         result_out["summary_metrics"] = summary_metrics(df)
-
-        try:
-            repr_data = dict(result)
-        except Exception:
-            repr_data = str(result)
-
-        result_out["ragas_result"] = {"repr": repr_data, "per_case": df.to_dict(orient="list")}
+        result_out["ragas_result"] = {"per_case": df.to_dict(orient="list")}
 
     except Exception as exc:
         logger.error("Error evaluating {}: {}", strategy.strategy_id, exc)
@@ -139,7 +132,7 @@ def main() -> None:
         print("\n" + "=" * 80)
         print(f"Chunking Strategy Comparison — mode={args.mode} (Average)")
         print("=" * 80)
-        print(tabulate(df_cmp, headers="keys", tablefmt="psql", showindex=False))
+        print(df_cmp.to_string(index=False))
         print("=" * 80 + "\n")
         df_cmp.to_csv(args.output_dir / f"{args.mode}_comparison_table.csv", index=False)
 

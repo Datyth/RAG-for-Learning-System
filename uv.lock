@@ -4317,7 +4317,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rag-for-learning-system"
+name = "simple-notebooklm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

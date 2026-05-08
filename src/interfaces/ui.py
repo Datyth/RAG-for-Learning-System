@@ -44,14 +44,6 @@ def _error_detail(r: httpx.Response) -> str:
         return r.text
 
 
-def _post_model(path: str, payload: dict, model: type[BaseModel], err: str) -> BaseModel | None:
-    r = _api("POST", path, json=payload)
-    if r.is_error:
-        st.error(f"{err}: {_error_detail(r)}")
-        return None
-    return model.model_validate(r.json())
-
-
 def _post_model_with_progress(
     path: str,
     payload: dict,
@@ -119,7 +111,9 @@ def _downloads(res: BaseModel, stem: str) -> None:
     c2.download_button("Tải Markdown", export(res, fmt="md"), f"{stem}.md", "text/markdown")
 
 
-def _render_citations(citations: list[Citation], chunks: list[RetrievedChunk] | None = None) -> None:
+def _render_citations(
+    citations: list[Citation], chunks: list[RetrievedChunk] | None = None
+) -> None:
     if not citations:
         return
 
@@ -142,7 +136,7 @@ def _render_citations(citations: list[Citation], chunks: list[RetrievedChunk] | 
 
 def _sidebar() -> tuple[list[str], int | None]:
     st.sidebar.markdown(
-        "<h2 style='margin:0 0 .1rem;font-size:1.3rem'>📚 RAG Learning</h2>"
+        "<h2 style='margin:0 0 .1rem;font-size:1.3rem'>📚 Simple NotebookLM</h2>"
         "<p style='margin:0 0 1rem;opacity:.55;font-size:.82rem'>Học tập thông minh với AI</p>",
         unsafe_allow_html=True,
     )
@@ -241,13 +235,13 @@ def _tab_chat(filenames: list[str], page: int | None) -> None:
     with st.chat_message("user"):
         st.markdown(q)
     with st.chat_message("assistant"):
-        with st.spinner("Đang suy nghĩ..."):
-            res = _post_model(
-                "/ask",
-                {"question": q, "filters": _filters_json(filenames, page)},
-                RagAnswer,
-                "Không thể trả lời",
-            )
+        res = _post_model_with_progress(
+            "/ask",
+            {"question": q, "filters": _filters_json(filenames, page)},
+            RagAnswer,
+            "Không thể trả lời",
+            "Đang suy nghĩ",
+        )
         if not res:
             return
         st.markdown(res.answer)
@@ -508,7 +502,7 @@ def _tab_flashcards(filenames: list[str], page: int | None) -> None:
 
 
 def run() -> None:
-    st.set_page_config(page_title="RAG Learning", page_icon="📚", layout="wide")
+    st.set_page_config(page_title="Simple NotebookLM", page_icon="📚", layout="wide")
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
     _init_state()
     filenames, page = _sidebar()
@@ -516,7 +510,7 @@ def run() -> None:
     col_title, col_ctx = st.columns([3, 1])
     with col_title:
         st.markdown(
-            "<h1 style='margin-bottom:.1rem'>Hệ thống học tập với RAG</h1>"
+            "<h1 style='margin-bottom:.1rem'>Simple NotebookLM</h1>"
             "<p style='margin:0 0 1rem;opacity:.6'>Hỏi đáp · Tóm tắt · Quiz · Flashcards — có trích dẫn nguồn từ PDF</p>",
             unsafe_allow_html=True,
         )
@@ -534,4 +528,5 @@ def run() -> None:
             fn(filenames, page)
 
 
-run()
+if __name__ == "__main__":
+    run()

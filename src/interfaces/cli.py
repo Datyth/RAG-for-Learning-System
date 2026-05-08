@@ -21,7 +21,7 @@ from src.store import close_client
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Minimal RAG CLI over local PDFs with learning features.",
+    help="Simple NotebookLM CLI for local PDF study.",
 )
 
 LEARNING_FORMATS = {"text", "json", "md"}
@@ -240,7 +240,7 @@ def main() -> None:
         lambda m: typer.echo(m, err=True),
         level="INFO",
         colorize=True,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <6}</level> | {message}",
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <4}</level> | {message}",
     )
     try:
         app()

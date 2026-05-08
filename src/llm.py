@@ -74,7 +74,7 @@ def _build_vllm() -> BaseChatModel:
 @lru_cache(maxsize=4)
 def get_llm(provider: str | None = None) -> BaseChatModel:
     """Return a cached LLM instance (optionally overriding provider)."""
-    provider = provider or settings.llm_provider
+    provider = settings.llm_provider if provider is None else provider
     if provider == "hf_local":
         return _build_hf_local()
     if provider == "gemini":

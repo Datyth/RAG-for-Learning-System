@@ -46,7 +46,7 @@ def get_client() -> QdrantClient:
 def ensure_collection(recreate: bool = False, collection_name: str | None = None) -> None:
     """Create the collection and payload indexes if they do not exist."""
     client = get_client()
-    name = collection_name or settings.qdrant_collection
+    name = settings.qdrant_collection if collection_name is None else collection_name
 
     exists = client.collection_exists(name)
     if exists and recreate:
@@ -109,7 +109,7 @@ def scroll_all(
 def get_vector_store(collection_name: str | None = None) -> QdrantVectorStore:
     return QdrantVectorStore(
         client=get_client(),
-        collection_name=collection_name or settings.qdrant_collection,
+        collection_name=settings.qdrant_collection if collection_name is None else collection_name,
         embedding=get_embeddings(),
     )
 

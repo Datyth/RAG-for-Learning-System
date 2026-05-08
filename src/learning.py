@@ -46,7 +46,7 @@ def _resolve_target(
         effective_filters["filename"] = document
 
     if query:
-        chunks = retrieve(query, k=k or retrieval_k, filters=effective_filters)
+        chunks = retrieve(query, k=retrieval_k if k is None else k, filters=effective_filters)
         target: str | None = query
         scope = "query"
     elif effective_filters:
@@ -176,7 +176,7 @@ def generate_quiz(
     if not chunks:
         raise RuntimeError("No chunks available for quiz generation.")
 
-    n = count or settings.quiz_default_count
+    n = settings.quiz_default_count if count is None else count
     valid_markers = {f"S{i}" for i in range(1, len(chunks) + 1)}
 
     prompt = render_prompt(QUIZ_TEMPLATE, chunks=chunks, count=n)
@@ -210,7 +210,7 @@ def generate_flashcards(
     if not chunks:
         raise RuntimeError("No chunks available for flashcard generation.")
 
-    n = count or settings.flashcards_default_count
+    n = settings.flashcards_default_count if count is None else count
     valid_markers = {f"S{i}" for i in range(1, len(chunks) + 1)}
 
     prompt = render_prompt(FLASHCARDS_TEMPLATE, chunks=chunks, count=n)
